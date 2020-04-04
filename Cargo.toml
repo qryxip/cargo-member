@@ -12,3 +12,17 @@ categories = ["development-tools", "development-tools::cargo-plugins"]
 publish = false
 
 [dependencies]
+anyhow = "1.0.28"
+atty = "0.2.14"
+cargo_metadata = "0.9.1"
+duct = "0.13.3"
+easy-ext = "0.1.6"
+env_logger = "0.7.1"
+ignore = "0.4.14"
+log = "0.4.8"
+remove_dir_all = "0.5.2"
+structopt = "0.3.12"
+strum = { version = "0.18.0", features = ["derive"] }
+termcolor = "1.1.0"
+toml_edit = "0.1.5"
+url = "2.1.1"
