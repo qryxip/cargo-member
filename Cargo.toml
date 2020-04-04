@@ -1,0 +1,14 @@
+[package]
+name = "cargo-member"
+version = "0.0.0"
+authors = ["Ryo Yamashita <qryxip@gmail.com>"]
+edition = "2018"
+description = "Cargo subcommand for including/excluding/removing/moving/copying workspace members."
+readme = "README.md"
+repository = "https://github.com/qryxip/cargo-member"
+license = "MIT OR Apache-2.0"
+keywords = ["cargo", "cargo-subcommand"]
+categories = ["development-tools", "development-tools::cargo-plugins"]
+publish = false
+
+[dependencies]
