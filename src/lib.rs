@@ -3,194 +3,387 @@ mod fs;
 
 use anyhow::{anyhow, bail, ensure, Context as _};
 use ignore::WalkBuilder;
-use std::{fmt::Display, io, iter, path::Path, str};
+use std::{
+    fmt::Display,
+    io, iter,
+    path::{Path, PathBuf},
+    str,
+};
 use termcolor::{ColorSpec, WriteColor};
 
-pub fn include<P: AsRef<Path>, W: WriteColor>(
+pub fn include<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
     workspace_root: &Path,
-    paths: &[P],
+    paths: I,
+    stderr: W,
+) -> Include<W> {
+    Include::new(workspace_root, paths, stderr)
+}
+
+pub fn exclude<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
+    workspace_root: &Path,
+    paths: I,
+    stderr: W,
+) -> Exclude<W> {
+    Exclude::new(workspace_root, paths, stderr)
+}
+
+pub fn cp<W: WriteColor>(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Cp<W> {
+    Cp::new(workspace_root, src, dst, stderr)
+}
+
+pub fn rm<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
+    workspace_root: &Path,
+    paths: I,
+    stderr: W,
+) -> Rm<W> {
+    Rm::new(workspace_root, paths, stderr)
+}
+
+pub fn mv<W: WriteColor>(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Mv<W> {
+    Mv::new(workspace_root, src, dst, stderr)
+}
+
+#[derive(Debug)]
+pub struct Include<W> {
+    stderr: W,
+    workspace_root: PathBuf,
+    paths: Vec<PathBuf>,
     force: bool,
     dry_run: bool,
-    mut stderr: W,
-) -> anyhow::Result<()> {
-    for path in iter::once(workspace_root).chain(paths.iter().map(|p| p.as_ref())) {
-        ensure_absolute(path)?;
-    }
-    let modified = paths.iter().try_fold(false, |acc, path| {
-        let path = path.as_ref();
-        if !(force || path.join("Cargo.toml").exists()) {
-            return Err(
-                anyhow!("`{}` does not exist", path.join("Cargo.toml").display()).context(format!(
-                    "`{}` does not seem to be a package. enable `--force` to add",
-                    path.display(),
-                )),
-            );
+}
+
+impl<W: WriteColor> Include<W> {
+    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(
+        workspace_root: &Path,
+        paths: I,
+        stderr: W,
+    ) -> Self {
+        Self {
+            stderr,
+            workspace_root: workspace_root.to_owned(),
+            paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
+            force: false,
+            dry_run: false,
         }
-        modify_members(
+    }
+
+    pub fn force(self, force: bool) -> Self {
+        Self { force, ..self }
+    }
+
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            mut stderr,
             workspace_root,
-            Some(path),
-            None,
-            None,
-            Some(path),
+            paths,
+            force,
             dry_run,
-            &mut stderr,
-        )
-        .map(|p| acc | p)
-    })?;
-    if !modified {
-        stderr.warn("`workspace` unchanged")?;
-    }
-    if dry_run {
-        stderr.warn("not modifying the manifest due to dry run")?;
-    }
-    Ok(())
-}
+        } = self;
 
-pub fn exclude<P: AsRef<Path>, W: WriteColor>(
-    workspace_root: &Path,
-    paths: &[P],
-    dry_run: bool,
-    mut stderr: W,
-) -> anyhow::Result<()> {
-    for path in iter::once(workspace_root).chain(paths.iter().map(|p| p.as_ref())) {
-        ensure_absolute(path)?;
-    }
-    let modified = paths.iter().try_fold(false, |acc, path| {
-        let path = path.as_ref();
-        modify_members(
-            workspace_root,
-            None,
-            Some(path),
-            Some(path),
-            None,
-            dry_run,
-            &mut stderr,
-        )
-        .map(|p| acc | p)
-    })?;
-    if !modified {
-        stderr.warn("`workspace` unchanged")?;
-    }
-    if dry_run {
-        stderr.warn("not modifying the manifest due to dry run")?;
-    }
-    Ok(())
-}
-
-pub fn cp<W: WriteColor>(
-    workspace_root: &Path,
-    src: &Path,
-    dst: &Path,
-    dry_run: bool,
-    mut stderr: W,
-) -> anyhow::Result<()> {
-    for path in &[workspace_root, src, dst] {
-        ensure_absolute(path)?;
-    }
-
-    let dst = if dst.exists() {
-        dst.join(src.file_name().expect("should be absolute"))
-    } else {
-        dst.to_owned()
-    };
-
-    let mut cargo_toml = crate::fs::read_toml_edit(src.join("Cargo.toml"))
-        .with_context(|| format!("`{}` does not seem to be a package", src.display()))?;
-    if let Some(package) = cargo_toml["package"].as_table_mut() {
-        package.remove("workspace");
-    }
-
-    stderr.status_with_color(
-        "Copying",
-        format!("`{}` to `{}`", src.display(), dst.display()),
-        termcolor::Color::Green,
-    )?;
-
-    let src_root = src;
-    for src in WalkBuilder::new(src_root).hidden(false).build() {
-        match src {
-            Ok(src) => {
-                let src = src.path();
-                if !(src.is_dir()
-                    || src == src_root.join("Cargo.toml")
-                    || src.starts_with(src_root.join(".git")))
-                {
-                    let dst = dst.join(src.strip_prefix(src_root)?);
-                    if let Some(parent) = dst.parent() {
-                        if !parent.exists() {
-                            crate::fs::create_dir_all(parent, dry_run)?;
-                        }
-                    }
-                    crate::fs::copy(src, dst, dry_run)?;
-                }
+        for path in iter::once(&workspace_root).chain(&paths) {
+            ensure_absolute(path)?;
+        }
+        let modified = paths.iter().try_fold(false, |acc, path| {
+            if !(force || path.join("Cargo.toml").exists()) {
+                return Err(
+                    anyhow!("`{}` does not exist", path.join("Cargo.toml").display()).context(
+                        format!(
+                            "`{}` does not seem to be a package. enable `--force` to add",
+                            path.display(),
+                        ),
+                    ),
+                );
             }
-            Err(err) => stderr.warn(err)?,
+            modify_members(
+                &workspace_root,
+                Some(path),
+                None,
+                None,
+                Some(path),
+                dry_run,
+                &mut stderr,
+            )
+            .map(|p| acc | p)
+        })?;
+        if !modified {
+            stderr.warn("`workspace` unchanged")?;
+        }
+        if dry_run {
+            stderr.warn("not modifying the manifest due to dry run")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct Exclude<W> {
+    stderr: W,
+    workspace_root: PathBuf,
+    paths: Vec<PathBuf>,
+    dry_run: bool,
+}
+
+impl<W: WriteColor> Exclude<W> {
+    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(
+        workspace_root: &Path,
+        paths: I,
+        stderr: W,
+    ) -> Self {
+        Self {
+            stderr,
+            workspace_root: workspace_root.to_owned(),
+            paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
+            dry_run: false,
         }
     }
 
-    crate::fs::write(dst.join("Cargo.toml"), cargo_toml.to_string(), dry_run)?;
-    if dry_run {
-        stderr.warn("not copying due to dry run")?;
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
     }
-    Ok(())
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            mut stderr,
+            workspace_root,
+            paths,
+            dry_run,
+        } = self;
+
+        for path in iter::once(&workspace_root).chain(&paths) {
+            ensure_absolute(path)?;
+        }
+        let modified = paths.iter().try_fold(false, |acc, path| {
+            modify_members(
+                &workspace_root,
+                None,
+                Some(path),
+                Some(path),
+                None,
+                dry_run,
+                &mut stderr,
+            )
+            .map(|p| acc | p)
+        })?;
+        if !modified {
+            stderr.warn("`workspace` unchanged")?;
+        }
+        if dry_run {
+            stderr.warn("not modifying the manifest due to dry run")?;
+        }
+        Ok(())
+    }
 }
 
-pub fn rm<P: AsRef<Path>, W: WriteColor>(
-    workspace_root: &Path,
-    paths: &[P],
+#[derive(Debug)]
+pub struct Cp<W> {
+    stderr: W,
+    workspace_root: PathBuf,
+    src: PathBuf,
+    dst: PathBuf,
+    dry_run: bool,
+}
+
+impl<W: WriteColor> Cp<W> {
+    pub fn new(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Self {
+        Self {
+            stderr,
+            workspace_root: workspace_root.to_owned(),
+            src: src.to_owned(),
+            dst: dst.to_owned(),
+            dry_run: false,
+        }
+    }
+
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            mut stderr,
+            workspace_root,
+            src,
+            dst,
+            dry_run,
+        } = self;
+
+        for path in &[&workspace_root, &src, &dst] {
+            ensure_absolute(path)?;
+        }
+
+        let dst = if dst.exists() {
+            dst.join(src.file_name().expect("should be absolute"))
+        } else {
+            dst
+        };
+
+        let mut cargo_toml = crate::fs::read_toml_edit(src.join("Cargo.toml"))
+            .with_context(|| format!("`{}` does not seem to be a package", src.display()))?;
+        if let Some(package) = cargo_toml["package"].as_table_mut() {
+            package.remove("workspace");
+        }
+
+        stderr.status_with_color(
+            "Copying",
+            format!("`{}` to `{}`", src.display(), dst.display()),
+            termcolor::Color::Green,
+        )?;
+
+        let src_root = src;
+        for src in WalkBuilder::new(&src_root).hidden(false).build() {
+            match src {
+                Ok(src) => {
+                    let src = src.path();
+                    if !(src.is_dir()
+                        || src == src_root.join("Cargo.toml")
+                        || src.starts_with(src_root.join(".git")))
+                    {
+                        let dst = dst.join(src.strip_prefix(&src_root)?);
+                        if let Some(parent) = dst.parent() {
+                            if !parent.exists() {
+                                crate::fs::create_dir_all(parent, dry_run)?;
+                            }
+                        }
+                        crate::fs::copy(src, dst, dry_run)?;
+                    }
+                }
+                Err(err) => stderr.warn(err)?,
+            }
+        }
+
+        crate::fs::write(dst.join("Cargo.toml"), cargo_toml.to_string(), dry_run)?;
+        if dry_run {
+            stderr.warn("not copying due to dry run")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct Rm<W> {
+    stderr: W,
+    workspace_root: PathBuf,
+    paths: Vec<PathBuf>,
     force: bool,
     dry_run: bool,
-    mut stderr: W,
-) -> anyhow::Result<()> {
-    for path in iter::once(workspace_root).chain(paths.iter().map(|p| p.as_ref())) {
-        ensure_absolute(path)?;
-    }
-
-    let modified = paths.iter().try_fold(false, |acc, path| {
-        let path = path.as_ref();
-        if !(force || path.join("Cargo.toml").exists()) {
-            return Err(
-                anyhow!("`{}` does not exist", path.join("Cargo.toml").display()).context(format!(
-                    "`{}` does not seem to be a package. enable `--force` to remove",
-                    path.display(),
-                )),
-            );
-        }
-        stderr.status_with_color(
-            "Removing",
-            format!("directory `{}`", path.display()),
-            termcolor::Color::Red,
-        )?;
-        crate::fs::remove_dir_all(path, dry_run)?;
-        modify_members(
-            workspace_root,
-            None,
-            None,
-            Some(path),
-            Some(path),
-            dry_run,
-            &mut stderr,
-        )
-        .map(|p| acc | p)
-    })?;
-    if !modified {
-        stderr.warn("`workspace` unchanged")?;
-    }
-    if dry_run {
-        stderr.warn("not modifying the manifest due to dry run")?;
-    }
-    Ok(())
 }
 
-pub fn mv<W: WriteColor>(
-    workspace_root: &Path,
-    src: &Path,
-    dst: &Path,
+impl<W: WriteColor> Rm<W> {
+    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(
+        workspace_root: &Path,
+        paths: I,
+        stderr: W,
+    ) -> Self {
+        Self {
+            stderr,
+            workspace_root: workspace_root.to_owned(),
+            paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
+            force: false,
+            dry_run: false,
+        }
+    }
+
+    pub fn force(self, force: bool) -> Self {
+        Self { force, ..self }
+    }
+
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            mut stderr,
+            workspace_root,
+            paths,
+            force,
+            dry_run,
+        } = self;
+
+        for path in iter::once(&workspace_root).chain(&paths) {
+            ensure_absolute(path)?;
+        }
+
+        let modified = paths.iter().try_fold(false, |acc, path| {
+            if !(force || path.join("Cargo.toml").exists()) {
+                return Err(
+                    anyhow!("`{}` does not exist", path.join("Cargo.toml").display()).context(
+                        format!(
+                            "`{}` does not seem to be a package. enable `--force` to remove",
+                            path.display(),
+                        ),
+                    ),
+                );
+            }
+            stderr.status_with_color(
+                "Removing",
+                format!("directory `{}`", path.display()),
+                termcolor::Color::Red,
+            )?;
+            crate::fs::remove_dir_all(path, dry_run)?;
+            modify_members(
+                &workspace_root,
+                None,
+                None,
+                Some(path),
+                Some(path),
+                dry_run,
+                &mut stderr,
+            )
+            .map(|p| acc | p)
+        })?;
+        if !modified {
+            stderr.warn("`workspace` unchanged")?;
+        }
+        if dry_run {
+            stderr.warn("not modifying the manifest due to dry run")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct Mv<W> {
+    stderr: W,
+    workspace_root: PathBuf,
+    src: PathBuf,
+    dst: PathBuf,
     dry_run: bool,
-    mut stderr: W,
-) -> anyhow::Result<()> {
-    cp(workspace_root, src, dst, dry_run, &mut stderr)?;
-    rm(workspace_root, &[src], false, dry_run, &mut stderr)
+}
+
+impl<W: WriteColor> Mv<W> {
+    pub fn new(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Self {
+        Self {
+            stderr,
+            workspace_root: workspace_root.to_owned(),
+            src: src.to_owned(),
+            dst: dst.to_owned(),
+            dry_run: false,
+        }
+    }
+
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            mut stderr,
+            workspace_root,
+            src,
+            dst,
+            dry_run,
+        } = self;
+
+        cp(&workspace_root, &src, &dst, &mut stderr)
+            .dry_run(dry_run)
+            .exec()?;
+        rm(&workspace_root, &[src], stderr).dry_run(dry_run).exec()
+    }
 }
 
 fn ensure_absolute(path: &Path) -> anyhow::Result<()> {
