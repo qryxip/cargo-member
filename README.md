@@ -6,7 +6,7 @@
 [![Crates.io](https://img.shields.io/badge/crates.io-not%20yet-inactive)](https://crates.io)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-informational)](https://crates.io)
 
-Cargo subcommand for including/excluding/removing/moving/copying workspace members.
+Cargo subcommand for including/excluding/creating/copying/removing workspace members.
 
 ## License
 

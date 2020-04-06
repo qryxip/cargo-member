@@ -1,14 +1,14 @@
 use anyhow::{ensure, Context as _};
-use cargo_metadata::{Metadata, MetadataCommand, Package, Resolve};
+use cargo_metadata::{Metadata, Package, Resolve};
 use easy_ext::ext;
 use env_logger::fmt::WriteStyle;
-use log::debug;
 use std::{
     env,
     ffi::OsStr,
     io::Write as _,
     path::{Path, PathBuf},
-    process, str,
+    process::{self, Stdio},
+    str,
 };
 use structopt::{clap::AppSettings, StructOpt};
 use strum::{EnumString, EnumVariantNames, IntoStaticStr, VariantNames as _};
@@ -35,6 +35,9 @@ pub enum CargoMember {
     /// Exclude a member from the workspace
     Exclude(CargoMemberExclude),
 
+    /// Create a new package with `cargo new`
+    New(CargoMemberNew),
+
     /// Copy a member in the workspace
     Cp(CargoMemberCp),
 
@@ -50,6 +53,7 @@ impl CargoMember {
         match *self {
             Self::Include(CargoMemberInclude { color, .. })
             | Self::Exclude(CargoMemberExclude { color, .. })
+            | Self::New(CargoMemberNew { color, .. })
             | Self::Cp(CargoMemberCp { color, .. })
             | Self::Rm(CargoMemberRm { color, .. })
             | Self::Mv(CargoMemberMv { color, .. }) => color,
@@ -71,6 +75,18 @@ pub struct CargoMemberInclude {
         default_value("auto")
     )]
     pub color: self::ColorChoice,
+
+    /// [cargo] Require Cargo.lock and cache are up to date
+    #[structopt(long)]
+    pub frozen: bool,
+
+    /// [cargo] Require Cargo.lock is up to date
+    #[structopt(long)]
+    pub locked: bool,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
 
     /// Allow non package paths
     #[structopt(long)]
@@ -103,12 +119,79 @@ pub struct CargoMemberExclude {
     )]
     pub color: self::ColorChoice,
 
+    /// [cargo] Require Cargo.lock and cache are up to date
+    #[structopt(long)]
+    pub frozen: bool,
+
+    /// [cargo] Require Cargo.lock is up to date
+    #[structopt(long)]
+    pub locked: bool,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
+
     /// Dry run
     #[structopt(long)]
     pub dry_run: bool,
 
     /// Paths to exclude
     pub paths: Vec<PathBuf>,
+}
+
+#[derive(StructOpt, Debug)]
+pub struct CargoMemberNew {
+    /// [cargo] Path to Cargo.toml
+    #[structopt(long, value_name("PATH"))]
+    pub manifest_path: Option<PathBuf>,
+
+    /// [cargo-new] Registry to use
+    #[structopt(long, value_name("REGISTRY"))]
+    pub registry: Option<String>,
+
+    /// [cargo-new] Initialize a new repository for the given version control system (git, hg, pijul, or fossil) or do not initialize any version control at all (none), overriding a global configuration.
+    #[structopt(
+        long,
+        value_name("VCS"),
+        possible_values(&["git", "hg", "pijul", "fossil", "none"])
+    )]
+    pub vcs: Option<String>,
+
+    /// [cargo-new] Use a library template
+    #[structopt(long)]
+    pub lib: bool,
+
+    /// [cargo-new] Set the resulting package name, defaults to the directory name
+    #[structopt(long, value_name("NAME"))]
+    pub name: Option<String>,
+
+    /// [cargo] Coloring
+    #[structopt(
+        long,
+        value_name("WHEN"),
+        possible_values(self::ColorChoice::VARIANTS),
+        default_value("auto")
+    )]
+    pub color: self::ColorChoice,
+
+    /// [cargo] Require Cargo.lock and cache are up to date
+    #[structopt(long)]
+    pub frozen: bool,
+
+    /// [cargo] Require Cargo.lock is up to date
+    #[structopt(long)]
+    pub locked: bool,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
+
+    /// Dry run
+    #[structopt(long)]
+    pub dry_run: bool,
+
+    /// [cargo-new] Path
+    pub path: PathBuf,
 }
 
 #[derive(StructOpt, Debug)]
@@ -125,6 +208,18 @@ pub struct CargoMemberCp {
         default_value("auto")
     )]
     pub color: self::ColorChoice,
+
+    /// [cargo] Require Cargo.lock and cache are up to date
+    #[structopt(long)]
+    pub frozen: bool,
+
+    /// [cargo] Require Cargo.lock is up to date
+    #[structopt(long)]
+    pub locked: bool,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
 
     /// Dry run
     #[structopt(long)]
@@ -156,6 +251,18 @@ pub struct CargoMemberRm {
     )]
     pub color: self::ColorChoice,
 
+    /// [cargo] Require Cargo.lock and cache are up to date
+    #[structopt(long)]
+    pub frozen: bool,
+
+    /// [cargo] Require Cargo.lock is up to date
+    #[structopt(long)]
+    pub locked: bool,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
+
     /// Allow non package paths
     #[structopt(long)]
     pub force: bool,
@@ -182,6 +289,18 @@ pub struct CargoMemberMv {
         default_value("auto")
     )]
     pub color: self::ColorChoice,
+
+    /// [cargo] Require Cargo.lock and cache are up to date
+    #[structopt(long)]
+    pub frozen: bool,
+
+    /// [cargo] Require Cargo.lock is up to date
+    #[structopt(long)]
+    pub locked: bool,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
 
     /// Dry run
     #[structopt(long)]
@@ -217,12 +336,18 @@ impl From<self::ColorChoice> for WriteStyle {
 pub struct Context<W> {
     cwd: PathBuf,
     stderr: W,
+    stderr_redirection: Stdio,
 }
 
 impl<W> Context<W> {
     pub fn new(stderr: W) -> anyhow::Result<Self> {
         let cwd = env::current_dir().with_context(|| "failed to get CWD")?;
-        Ok(Self { cwd, stderr })
+        let stderr_redirection = Stdio::inherit();
+        Ok(Self {
+            cwd,
+            stderr,
+            stderr_redirection,
+        })
     }
 }
 
@@ -269,6 +394,7 @@ pub fn run(opt: CargoMember, ctx: Context<impl WriteColor>) -> anyhow::Result<()
     match opt {
         CargoMember::Include(opt) => include(opt, ctx),
         CargoMember::Exclude(opt) => exclude(opt, ctx),
+        CargoMember::New(opt) => new(opt, ctx),
         CargoMember::Cp(opt) => cp(opt, ctx),
         CargoMember::Rm(opt) => rm(opt, ctx),
         CargoMember::Mv(opt) => mv(opt, ctx),
@@ -278,6 +404,9 @@ pub fn run(opt: CargoMember, ctx: Context<impl WriteColor>) -> anyhow::Result<()
 fn include(opt: CargoMemberInclude, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
     let CargoMemberInclude {
         manifest_path,
+        frozen,
+        locked,
+        offline,
         force,
         dry_run,
         paths,
@@ -286,11 +415,13 @@ fn include(opt: CargoMemberInclude, ctx: Context<impl WriteColor>) -> anyhow::Re
 
     let Context { cwd, stderr, .. } = ctx;
 
-    let Metadata { workspace_root, .. } = cargo_metadata(manifest_path.as_deref(), &cwd)?;
+    let Metadata { workspace_root, .. } =
+        crate::cargo_metadata(manifest_path.as_deref(), frozen, locked, offline, &cwd)?;
     let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
-    crate::include(&workspace_root, paths, stderr)
+    crate::include(&workspace_root, paths)
         .force(force)
         .dry_run(dry_run)
+        .stderr(stderr)
         .exec()
 }
 
@@ -298,6 +429,9 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
     let CargoMemberExclude {
         package,
         manifest_path,
+        frozen,
+        locked,
+        offline,
         dry_run,
         paths,
         ..
@@ -305,7 +439,7 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
 
     let Context { cwd, stderr, .. } = ctx;
 
-    let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
+    let metadata = crate::cargo_metadata(manifest_path.as_deref(), frozen, locked, offline, &cwd)?;
     let paths = paths
         .into_iter()
         .map(|p| Ok(cwd.join(p.trim_leading_dots())))
@@ -324,9 +458,51 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
         .exec()
 }
 
+fn new(opt: CargoMemberNew, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
+    let CargoMemberNew {
+        manifest_path,
+        registry,
+        vcs,
+        lib,
+        name,
+        frozen,
+        locked,
+        offline,
+        dry_run,
+        path,
+        ..
+    } = opt;
+
+    let Context {
+        cwd,
+        stderr,
+        stderr_redirection,
+    } = ctx;
+
+    let Metadata { workspace_root, .. } =
+        crate::cargo_metadata(manifest_path.as_deref(), frozen, locked, offline, &cwd)?;
+    let path = cwd.join(path.trim_leading_dots());
+
+    crate::new(&workspace_root, &path)
+        .cargo_new_registry(registry)
+        .cargo_new_vcs(vcs)
+        .cargo_new_lib(lib)
+        .cargo_new_name(name)
+        .cargo_new_stderr_redirection(stderr_redirection)
+        .frozen(frozen)
+        .locked(locked)
+        .offline(offline)
+        .dry_run(dry_run)
+        .stderr(stderr)
+        .exec()
+}
+
 fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
     let CargoMemberCp {
         manifest_path,
+        frozen,
+        locked,
+        offline,
         dry_run,
         src,
         dst,
@@ -335,7 +511,7 @@ fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     let Context { cwd, stderr, .. } = ctx;
 
-    let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
+    let metadata = crate::cargo_metadata(manifest_path.as_deref(), frozen, locked, offline, &cwd)?;
     let src = metadata
         .query_for_member(Some(&src))?
         .manifest_path
@@ -352,6 +528,9 @@ fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
     let CargoMemberRm {
         package,
         manifest_path,
+        frozen,
+        locked,
+        offline,
         force,
         dry_run,
         paths,
@@ -360,7 +539,7 @@ fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     let Context { cwd, stderr, .. } = ctx;
 
-    let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
+    let metadata = crate::cargo_metadata(manifest_path.as_deref(), frozen, locked, offline, &cwd)?;
     let paths = paths
         .into_iter()
         .map(|p| Ok(cwd.join(p.trim_leading_dots())))
@@ -383,6 +562,9 @@ fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
     let CargoMemberMv {
         manifest_path,
+        frozen,
+        locked,
+        offline,
         dry_run,
         src,
         dst,
@@ -391,7 +573,7 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     let Context { cwd, stderr, .. } = ctx;
 
-    let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
+    let metadata = crate::cargo_metadata(manifest_path.as_deref(), frozen, locked, offline, &cwd)?;
     let src = metadata
         .query_for_member(Some(&src))?
         .manifest_path
@@ -402,16 +584,6 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
     crate::mv(&metadata.workspace_root, &src, &dst, stderr)
         .dry_run(dry_run)
         .exec()
-}
-
-fn cargo_metadata(manifest_path: Option<&Path>, cwd: &Path) -> cargo_metadata::Result<Metadata> {
-    let mut cmd = MetadataCommand::new();
-    if let Some(manifest_path) = manifest_path {
-        cmd.manifest_path(manifest_path);
-    }
-    let metadata = cmd.current_dir(cwd).exec()?;
-    debug!("workspace-root: {}", metadata.workspace_root.display());
-    Ok(metadata)
 }
 
 #[ext(PathExt)]

@@ -2,21 +2,27 @@ pub mod cli;
 mod fs;
 
 use anyhow::{anyhow, bail, ensure, Context as _};
+use cargo_metadata::{Metadata, MetadataCommand};
 use ignore::WalkBuilder;
+use itertools::Itertools as _;
+use log::debug;
 use std::{
-    fmt::Display,
-    io, iter,
+    env,
+    ffi::{OsStr, OsString},
+    fmt::{self, Debug, Display},
+    io::{self, Sink},
+    iter,
     path::{Path, PathBuf},
-    str,
+    process::{Command, Stdio},
+    slice, str, vec,
 };
-use termcolor::{ColorSpec, WriteColor};
+use termcolor::{ColorSpec, NoColor, WriteColor};
 
-pub fn include<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
+pub fn include<I: IntoIterator<Item = P>, P: AsRef<Path>>(
     workspace_root: &Path,
     paths: I,
-    stderr: W,
-) -> Include<W> {
-    Include::new(workspace_root, paths, stderr)
+) -> Include<NoColor<Sink>> {
+    Include::new(workspace_root, paths)
 }
 
 pub fn exclude<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
@@ -25,6 +31,10 @@ pub fn exclude<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
     stderr: W,
 ) -> Exclude<W> {
     Exclude::new(workspace_root, paths, stderr)
+}
+
+pub fn new(workspace_root: &Path, path: &Path) -> New<NoColor<Sink>> {
+    New::new(workspace_root, path)
 }
 
 pub fn cp<W: WriteColor>(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Cp<W> {
@@ -45,28 +55,26 @@ pub fn mv<W: WriteColor>(workspace_root: &Path, src: &Path, dst: &Path, stderr: 
 
 #[derive(Debug)]
 pub struct Include<W> {
-    stderr: W,
     workspace_root: PathBuf,
     paths: Vec<PathBuf>,
     force: bool,
     dry_run: bool,
+    stderr: W,
 }
 
-impl<W: WriteColor> Include<W> {
-    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(
-        workspace_root: &Path,
-        paths: I,
-        stderr: W,
-    ) -> Self {
+impl Include<NoColor<Sink>> {
+    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(workspace_root: &Path, paths: I) -> Self {
         Self {
-            stderr,
             workspace_root: workspace_root.to_owned(),
             paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
             force: false,
             dry_run: false,
+            stderr: NoColor::new(io::sink()),
         }
     }
+}
 
+impl<W: WriteColor> Include<W> {
     pub fn force(self, force: bool) -> Self {
         Self { force, ..self }
     }
@@ -75,13 +83,23 @@ impl<W: WriteColor> Include<W> {
         Self { dry_run, ..self }
     }
 
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Include<W2> {
+        Include {
+            workspace_root: self.workspace_root,
+            paths: self.paths,
+            force: self.force,
+            dry_run: self.dry_run,
+            stderr,
+        }
+    }
+
     pub fn exec(self) -> anyhow::Result<()> {
         let Self {
-            mut stderr,
             workspace_root,
             paths,
             force,
             dry_run,
+            mut stderr,
         } = self;
 
         for path in iter::once(&workspace_root).chain(&paths) {
@@ -175,6 +193,247 @@ impl<W: WriteColor> Exclude<W> {
             stderr.warn("not modifying the manifest due to dry run")?;
         }
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct New<W> {
+    workspace_root: PathBuf,
+    path: PathBuf,
+    cargo_new_registry: Option<String>,
+    cargo_new_vcs: Option<String>,
+    cargo_new_lib: bool,
+    cargo_new_name: Option<String>,
+    cargo_new_stderr_redirection: Stdio,
+    frozen: bool,
+    locked: bool,
+    offline: bool,
+    dry_run: bool,
+    stderr: W,
+}
+
+impl New<NoColor<Sink>> {
+    pub fn new(workspace_root: &Path, path: &Path) -> Self {
+        Self {
+            workspace_root: workspace_root.to_owned(),
+            path: path.to_owned(),
+            cargo_new_registry: None,
+            cargo_new_vcs: None,
+            cargo_new_lib: false,
+            cargo_new_name: None,
+            cargo_new_stderr_redirection: Stdio::null(),
+            frozen: false,
+            locked: false,
+            offline: false,
+            dry_run: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+}
+
+impl<W: WriteColor> New<W> {
+    pub fn cargo_new_registry<S: AsRef<str>>(self, cargo_new_registry: Option<S>) -> Self {
+        let cargo_new_registry = cargo_new_registry.map(|s| s.as_ref().to_owned());
+        Self {
+            cargo_new_registry,
+            ..self
+        }
+    }
+
+    pub fn cargo_new_vcs<S: AsRef<str>>(self, cargo_new_vcs: Option<S>) -> Self {
+        let cargo_new_vcs = cargo_new_vcs.map(|s| s.as_ref().to_owned());
+        Self {
+            cargo_new_vcs,
+            ..self
+        }
+    }
+
+    pub fn cargo_new_lib(self, cargo_new_lib: bool) -> Self {
+        Self {
+            cargo_new_lib,
+            ..self
+        }
+    }
+
+    pub fn cargo_new_name<S: AsRef<str>>(self, cargo_new_name: Option<S>) -> Self {
+        let cargo_new_name = cargo_new_name.map(|s| s.as_ref().to_owned());
+        Self {
+            cargo_new_name,
+            ..self
+        }
+    }
+
+    pub fn cargo_new_stderr_redirection(self, cargo_new_stderr_redirection: Stdio) -> Self {
+        Self {
+            cargo_new_stderr_redirection,
+            ..self
+        }
+    }
+
+    pub fn frozen(self, frozen: bool) -> Self {
+        Self { frozen, ..self }
+    }
+
+    pub fn locked(self, locked: bool) -> Self {
+        Self { locked, ..self }
+    }
+
+    pub fn offline(self, offline: bool) -> Self {
+        Self { offline, ..self }
+    }
+
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> New<W2> {
+        New {
+            workspace_root: self.workspace_root,
+            path: self.path,
+            cargo_new_registry: self.cargo_new_registry,
+            cargo_new_vcs: self.cargo_new_vcs,
+            cargo_new_lib: self.cargo_new_lib,
+            cargo_new_name: self.cargo_new_name,
+            cargo_new_stderr_redirection: self.cargo_new_stderr_redirection,
+            frozen: self.frozen,
+            locked: self.locked,
+            offline: self.offline,
+            dry_run: self.dry_run,
+            stderr,
+        }
+    }
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            workspace_root,
+            path,
+            cargo_new_registry,
+            cargo_new_vcs,
+            cargo_new_lib,
+            cargo_new_name,
+            cargo_new_stderr_redirection,
+            frozen,
+            locked,
+            offline,
+            dry_run,
+            mut stderr,
+        } = self;
+
+        include(&workspace_root, &[&path])
+            .force(true)
+            .dry_run(dry_run)
+            .stderr(&mut stderr)
+            .exec()?;
+
+        if dry_run {
+            stderr.warn("not creating a new package due to dry run")?;
+        } else {
+            let cargo_exe = env::var_os("CARGO").with_context(|| "`$CARGO` should be present")?;
+
+            let args = Args::new()
+                .arg("new")
+                .option(cargo_new_registry.as_ref(), "--registry")
+                .option(cargo_new_vcs.as_ref(), "--vcs")
+                .flag(cargo_new_lib, "--lib")
+                .option(cargo_new_name.as_ref(), "--name")
+                .flag(frozen, "--frozen")
+                .flag(locked, "--locked")
+                .flag(offline, "--offline")
+                .arg(&path);
+
+            let output = Command::new(&cargo_exe)
+                .args(&args)
+                .current_dir(&workspace_root)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(cargo_new_stderr_redirection)
+                .output()
+                .with_context(|| format!("failed to execute `{}`", cargo_exe.to_string_lossy()))?;
+
+            stderr.write_all(&output.stderr)?;
+
+            if !output.status.success() {
+                bail!(
+                    "`{}{}` failed ({})",
+                    shell_escape::escape(cargo_exe.to_string_lossy()),
+                    args.0.iter().format_with("", |s, f| f(&format_args!(
+                        " {}",
+                        shell_escape::escape(s.to_string_lossy()),
+                    ))),
+                    output.status,
+                );
+            }
+        }
+
+        if !(frozen || locked) {
+            cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
+                false,
+                false,
+                offline,
+                &workspace_root,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default, Debug)]
+struct Args(Vec<OsString>);
+
+impl Args {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn flag(mut self, val: bool, long: &'static str) -> Self {
+        if val {
+            self.0.push(long.to_owned().into());
+        }
+        self
+    }
+
+    fn option(mut self, val: Option<impl AsRef<OsStr>>, long: &'static str) -> Self {
+        if let Some(val) = val {
+            self.0.push(long.to_owned().into());
+            self.0.push(val.as_ref().to_owned());
+        }
+        self
+    }
+
+    fn arg(mut self, val: impl AsRef<OsStr>) -> Self {
+        self.0.push(val.as_ref().to_owned());
+        self
+    }
+}
+
+impl AsRef<[OsString]> for Args {
+    fn as_ref(&self) -> &[OsString] {
+        &self.0
+    }
+}
+
+impl Display for Args {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        Debug::fmt(&self.0, fmt)
+    }
+}
+
+impl<'a> IntoIterator for &'a Args {
+    type Item = &'a OsString;
+    type IntoIter = slice::Iter<'a, OsString>;
+
+    fn into_iter(self) -> slice::Iter<'a, OsString> {
+        self.0.iter()
+    }
+}
+
+impl IntoIterator for Args {
+    type Item = OsString;
+    type IntoIter = vec::IntoIter<OsString>;
+
+    fn into_iter(self) -> vec::IntoIter<OsString> {
+        self.0.into_iter()
     }
 }
 
@@ -389,6 +648,31 @@ impl<W: WriteColor> Mv<W> {
 fn ensure_absolute(path: &Path) -> anyhow::Result<()> {
     ensure!(path.is_absolute(), "must be absolute: {}", path.display());
     Ok(())
+}
+
+fn cargo_metadata(
+    manifest_path: Option<&Path>,
+    frozen: bool,
+    locked: bool,
+    offline: bool,
+    cwd: &Path,
+) -> cargo_metadata::Result<Metadata> {
+    let mut cmd = MetadataCommand::new();
+    if let Some(manifest_path) = manifest_path {
+        cmd.manifest_path(manifest_path);
+    }
+    if frozen {
+        cmd.other_options(&["--frozen".to_owned()]);
+    }
+    if offline {
+        cmd.other_options(&["--offline".to_owned()]);
+    }
+    if locked {
+        cmd.other_options(&["--locked".to_owned()]);
+    }
+    let metadata = cmd.current_dir(cwd).exec()?;
+    debug!("workspace-root: {}", metadata.workspace_root.display());
+    Ok(metadata)
 }
 
 fn modify_members<'a>(

@@ -79,8 +79,10 @@ dependencies = [
  "easy-ext",
  "env_logger",
  "ignore",
+ "itertools",
  "log",
  "remove_dir_all",
+ "shell-escape",
  "structopt",
  "strum",
  "termcolor",
@@ -281,6 +283,15 @@ dependencies = [
  "thread_local",
  "walkdir",
  "winapi-util",
+]
+
+[[package]]
+name = "itertools"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "284f18f85651fe11e8a991b2adb42cb078325c996ed026d994719efcfca1d54b"
+dependencies = [
+ "either",
 ]
 
 [[package]]
@@ -508,9 +519,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.50"
+version = "1.0.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78a7a12c167809363ec3bd7329fc0a3369056996de43c4b37ef3cd54a6ce4867"
+checksum = "da07b57ee2623368351e9a0488bb0b261322a15a6e0ae53e243cbdc0f4208da9"
 dependencies = [
  "itoa",
  "ryu",
@@ -526,6 +537,12 @@ dependencies = [
  "libc",
  "winapi",
 ]
+
+[[package]]
+name = "shell-escape"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "170a13e64f2a51b77a45702ba77287f5c6829375b04a69cf2222acd17d0cfab9"
 
 [[package]]
 name = "smallvec"
