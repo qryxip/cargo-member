@@ -284,16 +284,14 @@ fn include(opt: CargoMemberInclude, ctx: Context<impl WriteColor>) -> anyhow::Re
         ..
     } = opt;
 
-    let Context {
-        cwd, mut stderr, ..
-    } = ctx;
+    let Context { cwd, stderr, .. } = ctx;
 
     let Metadata { workspace_root, .. } = cargo_metadata(manifest_path.as_deref(), &cwd)?;
-    let paths = paths
-        .into_iter()
-        .map(|p| cwd.join(p.trim_leading_dots()))
-        .collect::<Vec<_>>();
-    crate::include(&workspace_root, &paths, force, dry_run, &mut stderr)
+    let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
+    crate::include(&workspace_root, paths, stderr)
+        .force(force)
+        .dry_run(dry_run)
+        .exec()
 }
 
 fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
@@ -305,9 +303,7 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
         ..
     } = opt;
 
-    let Context {
-        cwd, mut stderr, ..
-    } = ctx;
+    let Context { cwd, stderr, .. } = ctx;
 
     let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
     let paths = paths
@@ -323,7 +319,9 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
         }))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    crate::exclude(&metadata.workspace_root, &paths, dry_run, &mut stderr)
+    crate::exclude(&metadata.workspace_root, paths, stderr)
+        .dry_run(dry_run)
+        .exec()
 }
 
 fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
@@ -335,9 +333,7 @@ fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         ..
     } = opt;
 
-    let Context {
-        cwd, mut stderr, ..
-    } = ctx;
+    let Context { cwd, stderr, .. } = ctx;
 
     let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
     let src = metadata
@@ -347,7 +343,9 @@ fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         .expect(r#"`manifest_path` should end with "Cargo.toml""#);
     let dst = cwd.join(dst.trim_leading_dots());
 
-    crate::cp(&metadata.workspace_root, &src, &dst, dry_run, &mut stderr)
+    crate::cp(&metadata.workspace_root, &src, &dst, stderr)
+        .dry_run(dry_run)
+        .exec()
 }
 
 fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
@@ -360,9 +358,7 @@ fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         ..
     } = opt;
 
-    let Context {
-        cwd, mut stderr, ..
-    } = ctx;
+    let Context { cwd, stderr, .. } = ctx;
 
     let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
     let paths = paths
@@ -378,13 +374,10 @@ fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         }))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    crate::rm(
-        &metadata.workspace_root,
-        &paths,
-        force,
-        dry_run,
-        &mut stderr,
-    )
+    crate::rm(&metadata.workspace_root, &paths, stderr)
+        .force(force)
+        .dry_run(dry_run)
+        .exec()
 }
 
 fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
@@ -396,9 +389,7 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         ..
     } = opt;
 
-    let Context {
-        cwd, mut stderr, ..
-    } = ctx;
+    let Context { cwd, stderr, .. } = ctx;
 
     let metadata = cargo_metadata(manifest_path.as_deref(), &cwd)?;
     let src = metadata
@@ -408,7 +399,9 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         .expect(r#"`manifest_path` should end with "Cargo.toml""#);
     let dst = cwd.join(dst.trim_leading_dots());
 
-    crate::mv(&metadata.workspace_root, &src, &dst, dry_run, &mut stderr)
+    crate::mv(&metadata.workspace_root, &src, &dst, stderr)
+        .dry_run(dry_run)
+        .exec()
 }
 
 fn cargo_metadata(manifest_path: Option<&Path>, cwd: &Path) -> cargo_metadata::Result<Metadata> {
