@@ -304,8 +304,6 @@ pub struct New<W> {
     cargo_new_lib: bool,
     cargo_new_name: Option<String>,
     cargo_new_stderr_redirection: Stdio,
-    frozen: bool,
-    locked: bool,
     offline: bool,
     dry_run: bool,
     stderr: W,
@@ -321,8 +319,6 @@ impl New<NoColor<Sink>> {
             cargo_new_lib: false,
             cargo_new_name: None,
             cargo_new_stderr_redirection: Stdio::null(),
-            frozen: false,
-            locked: false,
             offline: false,
             dry_run: false,
             stderr: NoColor::new(io::sink()),
@@ -369,14 +365,6 @@ impl<W: WriteColor> New<W> {
         }
     }
 
-    pub fn frozen(self, frozen: bool) -> Self {
-        Self { frozen, ..self }
-    }
-
-    pub fn locked(self, locked: bool) -> Self {
-        Self { locked, ..self }
-    }
-
     pub fn offline(self, offline: bool) -> Self {
         Self { offline, ..self }
     }
@@ -394,8 +382,6 @@ impl<W: WriteColor> New<W> {
             cargo_new_lib: self.cargo_new_lib,
             cargo_new_name: self.cargo_new_name,
             cargo_new_stderr_redirection: self.cargo_new_stderr_redirection,
-            frozen: self.frozen,
-            locked: self.locked,
             offline: self.offline,
             dry_run: self.dry_run,
             stderr,
@@ -411,8 +397,6 @@ impl<W: WriteColor> New<W> {
             cargo_new_lib,
             cargo_new_name,
             cargo_new_stderr_redirection,
-            frozen,
-            locked,
             offline,
             dry_run,
             mut stderr,
@@ -435,8 +419,6 @@ impl<W: WriteColor> New<W> {
                 .option(cargo_new_vcs.as_ref(), "--vcs")
                 .flag(cargo_new_lib, "--lib")
                 .option(cargo_new_name.as_ref(), "--name")
-                .flag(frozen, "--frozen")
-                .flag(locked, "--locked")
                 .flag(offline, "--offline")
                 .arg(&path);
 
@@ -464,15 +446,13 @@ impl<W: WriteColor> New<W> {
             }
         }
 
-        if !(frozen || locked) {
-            cargo_metadata(
-                Some(&workspace_root.join("Cargo.toml")),
-                false,
-                false,
-                offline,
-                &workspace_root,
-            )?;
-        }
+        cargo_metadata(
+            Some(&workspace_root.join("Cargo.toml")),
+            dry_run,
+            dry_run,
+            offline,
+            &workspace_root,
+        )?;
         Ok(())
     }
 }
