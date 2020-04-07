@@ -3,7 +3,7 @@ mod fs;
 
 use anyhow::{anyhow, bail, ensure, Context as _};
 use cargo_metadata::{Metadata, MetadataCommand};
-use ignore::WalkBuilder;
+use ignore::{Walk, WalkBuilder};
 use itertools::Itertools as _;
 use log::debug;
 use std::{
@@ -12,6 +12,7 @@ use std::{
     fmt::{self, Debug, Display},
     io::{self, Sink},
     iter,
+    ops::Deref,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     slice, str, vec,
@@ -31,6 +32,10 @@ pub fn exclude<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
     stderr: W,
 ) -> Exclude<W> {
     Exclude::new(workspace_root, paths, stderr)
+}
+
+pub fn focus(workspace_root: &Path, path: &Path) -> Focus<NoColor<Sink>> {
+    Focus::new(workspace_root, path)
 }
 
 pub fn new(workspace_root: &Path, path: &Path) -> New<NoColor<Sink>> {
@@ -118,10 +123,10 @@ impl<W: WriteColor> Include<W> {
             }
             modify_members(
                 &workspace_root,
-                Some(path),
-                None,
-                None,
-                Some(path),
+                &[path],
+                &[],
+                &[],
+                &[path],
                 dry_run,
                 &mut stderr,
             )
@@ -177,10 +182,10 @@ impl<W: WriteColor> Exclude<W> {
         let modified = paths.iter().try_fold(false, |acc, path| {
             modify_members(
                 &workspace_root,
-                None,
-                Some(path),
-                Some(path),
-                None,
+                &[],
+                &[path],
+                &[path],
+                &[],
                 dry_run,
                 &mut stderr,
             )
@@ -191,6 +196,100 @@ impl<W: WriteColor> Exclude<W> {
         }
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct Focus<W> {
+    workspace_root: PathBuf,
+    path: PathBuf,
+    dry_run: bool,
+    offline: bool,
+    stderr: W,
+}
+
+impl Focus<NoColor<Sink>> {
+    pub fn new(workspace_root: &Path, path: &Path) -> Self {
+        Self {
+            workspace_root: workspace_root.to_owned(),
+            path: path.to_owned(),
+            dry_run: false,
+            offline: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+}
+
+impl<W: WriteColor> Focus<W> {
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn offline(self, offline: bool) -> Self {
+        Self { offline, ..self }
+    }
+
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Focus<W2> {
+        Focus {
+            workspace_root: self.workspace_root,
+            path: self.path,
+            dry_run: self.dry_run,
+            offline: self.offline,
+            stderr,
+        }
+    }
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            workspace_root,
+            path,
+            dry_run,
+            offline,
+            mut stderr,
+        } = self;
+
+        for path in &[&workspace_root, &path] {
+            ensure_absolute(path)?;
+        }
+
+        let mut exclude = vec![];
+        for entry in Walk::new(&workspace_root) {
+            match entry {
+                Ok(entry) => {
+                    if entry.path().ends_with("Cargo.toml") {
+                        let dir = entry.path().parent().expect("should not empty");
+                        if ![&*workspace_root, &*path].contains(&dir) {
+                            exclude.push(dir.to_owned());
+                        }
+                    }
+                }
+                Err(err) => stderr.warn(err)?,
+            }
+        }
+        let exclude = exclude.iter().map(Deref::deref).collect::<Vec<_>>();
+
+        modify_members(
+            &workspace_root,
+            &[&path],
+            &exclude,
+            &exclude,
+            &[&path],
+            dry_run,
+            &mut stderr,
+        )?;
+
+        if dry_run {
+            stderr.warn("not modifying `workspace` due to dry run")?;
+        } else {
+            cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
+                false,
+                false,
+                offline,
+                &workspace_root,
+            )?;
         }
         Ok(())
     }
@@ -586,10 +685,10 @@ impl<W: WriteColor> Rm<W> {
             crate::fs::remove_dir_all(path, dry_run)?;
             modify_members(
                 &workspace_root,
-                None,
-                None,
-                Some(path),
-                Some(path),
+                &[],
+                &[],
+                &[path],
+                &[path],
                 dry_run,
                 &mut stderr,
             )
@@ -677,10 +776,10 @@ fn cargo_metadata(
 
 fn modify_members<'a>(
     workspace_root: &Path,
-    add_to_workspace_members: Option<&'a Path>,
-    add_to_workspace_exclude: Option<&'a Path>,
-    rm_from_workspace_members: Option<&'a Path>,
-    rm_from_workspace_exclude: Option<&'a Path>,
+    add_to_workspace_members: &[&'a Path],
+    add_to_workspace_exclude: &[&'a Path],
+    rm_from_workspace_members: &[&'a Path],
+    rm_from_workspace_exclude: &[&'a Path],
     dry_run: bool,
     mut stderr: impl WriteColor,
 ) -> anyhow::Result<bool> {
@@ -691,6 +790,7 @@ fn modify_members<'a>(
         rm_from_workspace_exclude,
     ]
     .iter()
+    .copied()
     .flatten()
     .any(|&p| p == workspace_root)
     {
@@ -729,7 +829,7 @@ fn modify_members<'a>(
             .or_insert(toml_edit::value(toml_edit::Array::default()))
             .as_array_mut()
             .with_context(|| format!("`workspace.{}` must be an array", field))?;
-        if let Some(add) = *add {
+        for add in *add {
             let add = relative_to_root(add)?;
             if array.iter().all(|m| !same_paths(m, add)) {
                 if !dry_run {
@@ -742,7 +842,7 @@ fn modify_members<'a>(
                 )?;
             }
         }
-        if let Some(rm) = rm {
+        for rm in *rm {
             let rm = relative_to_root(rm)?;
             let i = array.iter().position(|m| same_paths(m, rm));
             if let Some(i) = i {

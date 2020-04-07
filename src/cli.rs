@@ -35,6 +35,9 @@ pub enum CargoMember {
     /// Exclude a member from the workspace
     Exclude(CargoMemberExclude),
 
+    /// Include a package excluding the others
+    Focus(CargoMemberFocus),
+
     /// Create a new package with `cargo new`
     New(CargoMemberNew),
 
@@ -53,6 +56,7 @@ impl CargoMember {
         match *self {
             Self::Include(CargoMemberInclude { color, .. })
             | Self::Exclude(CargoMemberExclude { color, .. })
+            | Self::Focus(CargoMemberFocus { color, .. })
             | Self::New(CargoMemberNew { color, .. })
             | Self::Cp(CargoMemberCp { color, .. })
             | Self::Rm(CargoMemberRm { color, .. })
@@ -137,6 +141,33 @@ pub struct CargoMemberExclude {
 
     /// Paths to exclude
     pub paths: Vec<PathBuf>,
+}
+
+#[derive(StructOpt, Debug)]
+pub struct CargoMemberFocus {
+    /// Dry run
+    #[structopt(long)]
+    pub dry_run: bool,
+
+    /// [cargo] Path to Cargo.toml
+    #[structopt(long, value_name("PATH"))]
+    pub manifest_path: Option<PathBuf>,
+
+    /// [cargo] Coloring
+    #[structopt(
+        long,
+        value_name("WHEN"),
+        possible_values(self::ColorChoice::VARIANTS),
+        default_value("auto")
+    )]
+    pub color: self::ColorChoice,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
+
+    /// Path to focus
+    pub path: PathBuf,
 }
 
 #[derive(StructOpt, Debug)]
@@ -394,6 +425,7 @@ pub fn run(opt: CargoMember, ctx: Context<impl WriteColor>) -> anyhow::Result<()
     match opt {
         CargoMember::Include(opt) => include(opt, ctx),
         CargoMember::Exclude(opt) => exclude(opt, ctx),
+        CargoMember::Focus(opt) => focus(opt, ctx),
         CargoMember::New(opt) => new(opt, ctx),
         CargoMember::Cp(opt) => cp(opt, ctx),
         CargoMember::Rm(opt) => rm(opt, ctx),
@@ -455,6 +487,28 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
 
     crate::exclude(&metadata.workspace_root, paths, stderr)
         .dry_run(dry_run)
+        .exec()
+}
+
+fn focus(opt: CargoMemberFocus, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
+    let CargoMemberFocus {
+        dry_run,
+        manifest_path,
+        offline,
+        path,
+        ..
+    } = opt;
+
+    let Context { cwd, stderr, .. } = ctx;
+
+    let Metadata { workspace_root, .. } =
+        crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
+    let path = cwd.join(path.trim_leading_dots());
+
+    crate::focus(&workspace_root, &path)
+        .dry_run(dry_run)
+        .offline(offline)
+        .stderr(stderr)
         .exec()
 }
 
