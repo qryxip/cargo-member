@@ -28,3 +28,7 @@ strum = { version = "0.18.0", features = ["derive"] }
 termcolor = "1.1.0"
 toml_edit = "0.1.5"
 url = "2.1.1"
+
+[dev-dependencies]
+difference = "2.0.0"
+tempdir = "0.3.7"
