@@ -110,6 +110,7 @@ impl<W: WriteColor> Include<W> {
         for path in iter::once(&workspace_root).chain(&paths) {
             ensure_absolute(path)?;
         }
+
         let modified = paths.iter().try_fold(false, |acc, path| {
             if !(force || path.join("Cargo.toml").exists()) {
                 return Err(
@@ -132,11 +133,23 @@ impl<W: WriteColor> Include<W> {
             )
             .map(|p| acc | p)
         })?;
+
         if !modified {
             stderr.warn("`workspace` unchanged")?;
         }
+
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
+        }
+
+        if !force {
+            cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
+                dry_run,
+                dry_run,
+                false,
+                &workspace_root,
+            )?;
         }
         Ok(())
     }
