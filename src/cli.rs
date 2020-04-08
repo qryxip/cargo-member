@@ -517,8 +517,9 @@ fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         .expect(r#"`manifest_path` should end with "Cargo.toml""#);
     let dst = cwd.join(dst.trim_leading_dots());
 
-    crate::cp(&metadata.workspace_root, &src, &dst, stderr)
+    crate::cp(&metadata.workspace_root, &src, &dst)
         .dry_run(dry_run)
+        .stderr(stderr)
         .exec()
 }
 
@@ -550,9 +551,10 @@ fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         }))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    crate::rm(&metadata.workspace_root, &paths, stderr)
+    crate::rm(&metadata.workspace_root, &paths)
         .force(force)
         .dry_run(dry_run)
+        .stderr(stderr)
         .exec()
 }
 
@@ -577,8 +579,9 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         .expect(r#"`manifest_path` should end with "Cargo.toml""#);
     let dst = cwd.join(dst.trim_leading_dots());
 
-    crate::mv(&metadata.workspace_root, &src, &dst, stderr)
+    crate::mv(&metadata.workspace_root, &src, &dst)
         .dry_run(dry_run)
+        .stderr(stderr)
         .exec()
 }
 

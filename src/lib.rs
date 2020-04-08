@@ -42,20 +42,19 @@ pub fn new(workspace_root: &Path, path: &Path) -> New<NoColor<Sink>> {
     New::new(workspace_root, path)
 }
 
-pub fn cp<W: WriteColor>(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Cp<W> {
-    Cp::new(workspace_root, src, dst, stderr)
+pub fn cp(workspace_root: &Path, src: &Path, dst: &Path) -> Cp<NoColor<Sink>> {
+    Cp::new(workspace_root, src, dst)
 }
 
-pub fn rm<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
+pub fn rm<I: IntoIterator<Item = P>, P: AsRef<Path>>(
     workspace_root: &Path,
     paths: I,
-    stderr: W,
-) -> Rm<W> {
-    Rm::new(workspace_root, paths, stderr)
+) -> Rm<NoColor<Sink>> {
+    Rm::new(workspace_root, paths)
 }
 
-pub fn mv<W: WriteColor>(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Mv<W> {
-    Mv::new(workspace_root, src, dst, stderr)
+pub fn mv(workspace_root: &Path, src: &Path, dst: &Path) -> Mv<NoColor<Sink>> {
+    Mv::new(workspace_root, src, dst)
 }
 
 #[derive(Debug)]
@@ -525,14 +524,26 @@ pub struct Cp<W> {
     dry_run: bool,
 }
 
-impl<W: WriteColor> Cp<W> {
-    pub fn new(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Self {
+impl Cp<NoColor<Sink>> {
+    pub fn new(workspace_root: &Path, src: &Path, dst: &Path) -> Self {
         Self {
-            stderr,
+            stderr: NoColor::new(io::sink()),
             workspace_root: workspace_root.to_owned(),
             src: src.to_owned(),
             dst: dst.to_owned(),
             dry_run: false,
+        }
+    }
+}
+
+impl<W: WriteColor> Cp<W> {
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Cp<W2> {
+        Cp {
+            stderr,
+            workspace_root: self.workspace_root,
+            src: self.src,
+            dst: self.dst,
+            dry_run: self.dry_run,
         }
     }
 
@@ -610,18 +621,26 @@ pub struct Rm<W> {
     dry_run: bool,
 }
 
-impl<W: WriteColor> Rm<W> {
-    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(
-        workspace_root: &Path,
-        paths: I,
-        stderr: W,
-    ) -> Self {
+impl Rm<NoColor<Sink>> {
+    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(workspace_root: &Path, paths: I) -> Self {
         Self {
-            stderr,
+            stderr: NoColor::new(io::sink()),
             workspace_root: workspace_root.to_owned(),
             paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
             force: false,
             dry_run: false,
+        }
+    }
+}
+
+impl<W: WriteColor> Rm<W> {
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Rm<W2> {
+        Rm {
+            stderr,
+            workspace_root: self.workspace_root,
+            paths: self.paths,
+            force: self.force,
+            dry_run: self.dry_run,
         }
     }
 
@@ -693,14 +712,26 @@ pub struct Mv<W> {
     dry_run: bool,
 }
 
-impl<W: WriteColor> Mv<W> {
-    pub fn new(workspace_root: &Path, src: &Path, dst: &Path, stderr: W) -> Self {
+impl Mv<NoColor<Sink>> {
+    pub fn new(workspace_root: &Path, src: &Path, dst: &Path) -> Self {
         Self {
-            stderr,
+            stderr: NoColor::new(io::sink()),
             workspace_root: workspace_root.to_owned(),
             src: src.to_owned(),
             dst: dst.to_owned(),
             dry_run: false,
+        }
+    }
+}
+
+impl<W: WriteColor> Mv<W> {
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Mv<W2> {
+        Mv {
+            stderr,
+            workspace_root: self.workspace_root,
+            src: self.src,
+            dst: self.dst,
+            dry_run: self.dry_run,
         }
     }
 
@@ -717,10 +748,14 @@ impl<W: WriteColor> Mv<W> {
             dry_run,
         } = self;
 
-        cp(&workspace_root, &src, &dst, &mut stderr)
+        cp(&workspace_root, &src, &dst)
             .dry_run(dry_run)
+            .stderr(&mut stderr)
             .exec()?;
-        rm(&workspace_root, &[src], stderr).dry_run(dry_run).exec()
+        rm(&workspace_root, &[src])
+            .dry_run(dry_run)
+            .stderr(stderr)
+            .exec()
     }
 }
 
