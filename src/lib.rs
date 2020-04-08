@@ -140,16 +140,18 @@ impl<W: WriteColor> Include<W> {
 
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
-        }
-
-        if !force {
-            cargo_metadata(
+        } else {
+            let result = cargo_metadata(
                 Some(&workspace_root.join("Cargo.toml")),
-                dry_run,
-                dry_run,
+                false,
+                false,
                 false,
                 &workspace_root,
-            )?;
+            );
+
+            if !force {
+                result?;
+            }
         }
         Ok(())
     }
@@ -457,15 +459,15 @@ impl<W: WriteColor> New<W> {
                     output.status,
                 );
             }
-        }
 
-        cargo_metadata(
-            Some(&workspace_root.join("Cargo.toml")),
-            dry_run,
-            dry_run,
-            offline,
-            &workspace_root,
-        )?;
+            cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
+                false,
+                false,
+                offline,
+                &workspace_root,
+            )?;
+        }
         Ok(())
     }
 }
