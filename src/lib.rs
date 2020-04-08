@@ -720,11 +720,25 @@ impl<W: WriteColor> Rm<W> {
             )
             .map(|p| acc | p)
         })?;
+
         if !modified {
             stderr.warn("`workspace` unchanged")?;
         }
+
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
+        } else {
+            let result = cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
+                false,
+                false,
+                false,
+                &workspace_root,
+            );
+
+            if !force {
+                result?;
+            }
         }
         Ok(())
     }
