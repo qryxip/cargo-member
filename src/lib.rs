@@ -1,3 +1,4 @@
+#[doc(hidden)]
 pub mod cli;
 mod fs;
 
