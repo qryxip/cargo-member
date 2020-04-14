@@ -19,13 +19,10 @@ fn normal() -> anyhow::Result<()> {
 
     let mut stderr = vec![];
 
-    cargo_member::exclude(
-        tempdir.path(),
-        &[tempdir.path().join("b")],
-        NoColor::new(&mut stderr),
-    )
-    .dry_run(false)
-    .exec()?;
+    cargo_member::exclude(tempdir.path(), &[tempdir.path().join("b")])
+        .dry_run(false)
+        .stderr(NoColor::new(&mut stderr))
+        .exec()?;
 
     assert_manifest(&tempdir.path().join("Cargo.toml"), EXPECTED_MANIFEST)?;
     assert_stderr(&stderr, EXPECTED_STDERR)?;
@@ -58,13 +55,10 @@ fn dry_run() -> anyhow::Result<()> {
 
     let mut stderr = vec![];
 
-    cargo_member::exclude(
-        tempdir.path(),
-        &[tempdir.path().join("b")],
-        NoColor::new(&mut stderr),
-    )
-    .dry_run(true)
-    .exec()?;
+    cargo_member::exclude(tempdir.path(), &[tempdir.path().join("b")])
+        .dry_run(true)
+        .stderr(NoColor::new(&mut stderr))
+        .exec()?;
 
     assert_manifest(&tempdir.path().join("Cargo.toml"), MANIFEST)?;
     assert_stderr(&stderr, EXPECTED_STDERR)?;
