@@ -1,3 +1,5 @@
+#![warn(rust_2018_idioms)]
+
 #[doc(hidden)]
 pub mod cli;
 mod fs;
@@ -525,7 +527,7 @@ impl AsRef<[OsString]> for Args {
 }
 
 impl Display for Args {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, fmt)
     }
 }
