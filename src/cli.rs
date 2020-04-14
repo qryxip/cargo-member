@@ -434,8 +434,9 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
         }))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    crate::exclude(&metadata.workspace_root, paths, stderr)
+    crate::exclude(&metadata.workspace_root, paths)
         .dry_run(dry_run)
+        .stderr(stderr)
         .exec()
 }
 

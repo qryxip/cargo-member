@@ -27,12 +27,11 @@ pub fn include<I: IntoIterator<Item = P>, P: AsRef<Path>>(
     Include::new(workspace_root, paths)
 }
 
-pub fn exclude<I: IntoIterator<Item = P>, P: AsRef<Path>, W: WriteColor>(
+pub fn exclude<I: IntoIterator<Item = P>, P: AsRef<Path>>(
     workspace_root: &Path,
     paths: I,
-    stderr: W,
-) -> Exclude<W> {
-    Exclude::new(workspace_root, paths, stderr)
+) -> Exclude<NoColor<Sink>> {
+    Exclude::new(workspace_root, paths)
 }
 
 pub fn focus(workspace_root: &Path, path: &Path) -> Focus<NoColor<Sink>> {
@@ -159,28 +158,35 @@ impl<W: WriteColor> Include<W> {
 
 #[derive(Debug)]
 pub struct Exclude<W> {
-    stderr: W,
     workspace_root: PathBuf,
     paths: Vec<PathBuf>,
     dry_run: bool,
+    stderr: W,
 }
 
-impl<W: WriteColor> Exclude<W> {
-    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(
-        workspace_root: &Path,
-        paths: I,
-        stderr: W,
-    ) -> Self {
+impl Exclude<NoColor<Sink>> {
+    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(workspace_root: &Path, paths: I) -> Self {
         Self {
-            stderr,
+            stderr: NoColor::new(io::sink()),
             workspace_root: workspace_root.to_owned(),
             paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
             dry_run: false,
         }
     }
+}
 
+impl<W: WriteColor> Exclude<W> {
     pub fn dry_run(self, dry_run: bool) -> Self {
         Self { dry_run, ..self }
+    }
+
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Exclude<W2> {
+        Exclude {
+            workspace_root: self.workspace_root,
+            paths: self.paths,
+            dry_run: self.dry_run,
+            stderr,
+        }
     }
 
     pub fn exec(self) -> anyhow::Result<()> {
