@@ -811,7 +811,7 @@ fn cargo_metadata(
     locked: bool,
     offline: bool,
     cwd: &Path,
-) -> cargo_metadata::Result<Metadata> {
+) -> anyhow::Result<Metadata> {
     let mut cmd = MetadataCommand::new();
     if let Some(manifest_path) = manifest_path {
         cmd.manifest_path(manifest_path);
@@ -825,7 +825,10 @@ fn cargo_metadata(
     if locked {
         cmd.other_options(&["--locked".to_owned()]);
     }
-    let metadata = cmd.current_dir(cwd).exec()?;
+    let metadata = cmd.current_dir(cwd).exec().map_err(|err| match err {
+        cargo_metadata::Error::CargoMetadata { stderr } => anyhow!("{}", stderr.trim_end()),
+        err => err.into(),
+    })?;
     debug!("workspace-root: {}", metadata.workspace_root.display());
     Ok(metadata)
 }
