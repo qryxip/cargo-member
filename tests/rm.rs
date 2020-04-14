@@ -1,3 +1,5 @@
+#![warn(rust_2018_idioms)]
+
 use cargo_metadata::MetadataCommand;
 use difference::assert_diff;
 use duct::cmd;
