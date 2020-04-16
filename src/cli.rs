@@ -224,6 +224,10 @@ pub struct CargoMemberCp {
     #[structopt(long)]
     pub dry_run: bool,
 
+    /// Do not modify the `package.name`
+    #[structopt(long)]
+    pub no_rename: bool,
+
     /// Package ID specification
     pub src: String,
 
@@ -288,6 +292,10 @@ pub struct CargoMemberMv {
     /// Dry run. Also enables `--frozen` and `--locked`
     #[structopt(long)]
     pub dry_run: bool,
+
+    /// Do not modify the `package.name`
+    #[structopt(long)]
+    pub no_rename: bool,
 
     /// Package ID specification
     pub src: String,
@@ -502,6 +510,7 @@ fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         manifest_path,
         offline,
         dry_run,
+        no_rename,
         src,
         dst,
         ..
@@ -520,6 +529,7 @@ fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     crate::cp(&metadata.workspace_root, &src, &dst)
         .dry_run(dry_run)
+        .no_rename(no_rename)
         .stderr(stderr)
         .exec()
 }
@@ -564,6 +574,7 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         manifest_path,
         offline,
         dry_run,
+        no_rename,
         src,
         dst,
         ..
@@ -582,6 +593,7 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     crate::mv(&metadata.workspace_root, &src, &dst)
         .dry_run(dry_run)
+        .no_rename(no_rename)
         .stderr(stderr)
         .exec()
 }
