@@ -557,6 +557,7 @@ pub struct Cp<W> {
     src: PathBuf,
     dst: PathBuf,
     dry_run: bool,
+    no_rename: bool,
 }
 
 impl Cp<NoColor<Sink>> {
@@ -567,6 +568,7 @@ impl Cp<NoColor<Sink>> {
             src: src.to_owned(),
             dst: dst.to_owned(),
             dry_run: false,
+            no_rename: false,
         }
     }
 }
@@ -579,11 +581,16 @@ impl<W: WriteColor> Cp<W> {
             src: self.src,
             dst: self.dst,
             dry_run: self.dry_run,
+            no_rename: self.no_rename,
         }
     }
 
     pub fn dry_run(self, dry_run: bool) -> Self {
         Self { dry_run, ..self }
+    }
+
+    pub fn no_rename(self, no_rename: bool) -> Self {
+        Self { no_rename, ..self }
     }
 
     pub fn exec(self) -> anyhow::Result<()> {
@@ -593,6 +600,7 @@ impl<W: WriteColor> Cp<W> {
             src,
             dst,
             dry_run,
+            no_rename,
         } = self;
 
         for path in &[&workspace_root, &src, &dst] {
@@ -605,10 +613,19 @@ impl<W: WriteColor> Cp<W> {
             dst
         };
 
+        ensure!(!dst.exists(), "`{}` exists", dst.display());
+
         let mut cargo_toml = crate::fs::read_toml_edit(src.join("Cargo.toml"))
             .with_context(|| format!("`{}` does not seem to be a package", src.display()))?;
         if let Some(package) = cargo_toml["package"].as_table_mut() {
             package.remove("workspace");
+            if !no_rename {
+                let file_name = dst.file_name().expect("should exist");
+                let file_name = file_name
+                    .to_str()
+                    .with_context(|| format!("{:?} is not valid UTF-8", file_name))?;
+                package["name"] = toml_edit::value(file_name);
+            }
         }
 
         stderr.status_with_color(
@@ -640,6 +657,28 @@ impl<W: WriteColor> Cp<W> {
         }
 
         crate::fs::write(dst.join("Cargo.toml"), cargo_toml.to_string(), dry_run)?;
+
+        if let [_, dst_workspace_root] = &*dst
+            .ancestors()
+            .filter(|d| d.join("Cargo.toml").exists())
+            .collect::<Vec<_>>()
+        {
+            stderr.info(format_args!(
+                "Found workspace `{}`",
+                dst_workspace_root.display(),
+            ))?;
+
+            modify_members(
+                dst_workspace_root,
+                &[&dst],
+                &[],
+                &[],
+                &[&dst],
+                dry_run,
+                &mut stderr,
+            )?;
+        }
+
         if dry_run {
             stderr.warn("not copying due to dry run")?;
         }
@@ -759,6 +798,7 @@ pub struct Mv<W> {
     src: PathBuf,
     dst: PathBuf,
     dry_run: bool,
+    no_rename: bool,
 }
 
 impl Mv<NoColor<Sink>> {
@@ -769,6 +809,7 @@ impl Mv<NoColor<Sink>> {
             src: src.to_owned(),
             dst: dst.to_owned(),
             dry_run: false,
+            no_rename: false,
         }
     }
 }
@@ -781,11 +822,16 @@ impl<W: WriteColor> Mv<W> {
             src: self.src,
             dst: self.dst,
             dry_run: self.dry_run,
+            no_rename: self.no_rename,
         }
     }
 
     pub fn dry_run(self, dry_run: bool) -> Self {
         Self { dry_run, ..self }
+    }
+
+    pub fn no_rename(self, no_rename: bool) -> Self {
+        Self { no_rename, ..self }
     }
 
     pub fn exec(self) -> anyhow::Result<()> {
@@ -795,12 +841,15 @@ impl<W: WriteColor> Mv<W> {
             src,
             dst,
             dry_run,
+            no_rename,
         } = self;
 
         cp(&workspace_root, &src, &dst)
             .dry_run(dry_run)
+            .no_rename(no_rename)
             .stderr(&mut stderr)
             .exec()?;
+
         rm(&workspace_root, &[src])
             .dry_run(dry_run)
             .stderr(stderr)
@@ -934,6 +983,18 @@ fn modify_members<'a>(
 }
 
 trait WriteColorExt: WriteColor {
+    fn info(&mut self, message: impl Display) -> io::Result<()> {
+        self.set_color(
+            ColorSpec::new()
+                .set_fg(Some(termcolor::Color::Cyan))
+                .set_bold(true)
+                .set_reset(false),
+        )?;
+        self.write_all(b"info:")?;
+        self.reset()?;
+        writeln!(self, " {}", message)
+    }
+
     fn warn(&mut self, message: impl Display) -> io::Result<()> {
         self.set_color(
             ColorSpec::new()
