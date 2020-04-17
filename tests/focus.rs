@@ -22,7 +22,7 @@ fn focus() -> anyhow::Result<()> {
 
     let mut stderr = vec![];
 
-    cargo_member::focus(tempdir.path(), &tempdir.path().join("a"))
+    cargo_member::Focus::new(tempdir.path(), &tempdir.path().join("a"))
         .dry_run(false)
         .offline(true)
         .stderr(NoColor::new(&mut stderr))

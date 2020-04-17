@@ -1,6 +1,6 @@
 #![warn(rust_2018_idioms)]
 
-use cargo_metadata::MetadataCommand;
+use cargo_metadata::{Metadata, MetadataCommand};
 use difference::assert_diff;
 use duct::cmd;
 use std::{
@@ -18,10 +18,12 @@ fn normal() -> anyhow::Result<()> {
     fs::write(tempdir.path().join("Cargo.toml"), ORIGINAL)?;
     cargo_new(&tempdir.path().join("a"))?;
     cargo_new(&tempdir.path().join("b"))?;
+    cargo_new(&tempdir.path().join("c"))?;
+    let metadata = cargo_metadata(&tempdir.path().join("Cargo.toml"), &[])?;
 
     let mut stderr = vec![];
 
-    cargo_member::exclude(tempdir.path(), &[tempdir.path().join("b")])
+    cargo_member::Exclude::from_metadata(&metadata, &[tempdir.path().join("b")], &["c"])
         .dry_run(false)
         .stderr(NoColor::new(&mut stderr))
         .exec()?;
@@ -32,17 +34,19 @@ fn normal() -> anyhow::Result<()> {
     return Ok(());
 
     static ORIGINAL: &str = r#"[workspace]
-members = ["a", "b"]
+members = ["a", "b", "c"]
 exclude = []
 "#;
 
     static EXPECTED_MANIFEST: &str = r#"[workspace]
 members = ["a"]
-exclude = ["b"]
+exclude = ["b", "c"]
 "#;
 
     static EXPECTED_STDERR: &str = r#"    Removing "b" from `workspace.members`
       Adding "b" to `workspace.exclude`
+    Removing "c" from `workspace.members`
+      Adding "c" to `workspace.exclude`
 "#;
 }
 
@@ -53,11 +57,12 @@ fn dry_run() -> anyhow::Result<()> {
     fs::write(tempdir.path().join("Cargo.toml"), MANIFEST)?;
     cargo_new(&tempdir.path().join("a"))?;
     cargo_new(&tempdir.path().join("b"))?;
-    cargo_metadata(&tempdir.path().join("Cargo.toml"), &[])?;
+    cargo_new(&tempdir.path().join("c"))?;
+    let metadata = cargo_metadata(&tempdir.path().join("Cargo.toml"), &[])?;
 
     let mut stderr = vec![];
 
-    cargo_member::exclude(tempdir.path(), &[tempdir.path().join("b")])
+    cargo_member::Exclude::from_metadata(&metadata, &[tempdir.path().join("b")], &["c"])
         .dry_run(true)
         .stderr(NoColor::new(&mut stderr))
         .exec()?;
@@ -68,12 +73,14 @@ fn dry_run() -> anyhow::Result<()> {
     return Ok(());
 
     static MANIFEST: &str = r#"[workspace]
-members = ["a", "b"]
+members = ["a", "b", "c"]
 exclude = []
 "#;
 
     static EXPECTED_STDERR: &str = r#"    Removing "b" from `workspace.members`
       Adding "b" to `workspace.exclude`
+    Removing "c" from `workspace.members`
+      Adding "c" to `workspace.exclude`
 warning: `workspace` unchanged
 warning: not modifying the manifest due to dry run
 "#;
@@ -96,7 +103,7 @@ fn assert_stderr(stderr: &[u8], expected: &str) -> std::result::Result<(), Utf8E
     Ok(())
 }
 
-fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result<()> {
+fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result<Metadata> {
     let opts = opts
         .iter()
         .copied()
@@ -107,5 +114,4 @@ fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result
         .manifest_path(manifest_path)
         .other_options(&opts)
         .exec()
-        .map(drop)
 }
