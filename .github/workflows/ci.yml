@@ -111,11 +111,11 @@ jobs:
           default: true
           profile: default
 
-      - name: '`cargo clippy --target ${{ matrix.target-triple }} -v -- -D warnings`'
+      - name: '`cargo clippy --all-targets --target ${{ matrix.target-triple }} -v -- -D warnings`'
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --target ${{ matrix.target-triple }} -v -- -D warnings
+          args: --all-targets --target ${{ matrix.target-triple }} -v -- -D warnings
         if: matrix.channel == 'stable'
 
       - name: '`cargo test --no-fail-fast --target ${{ matrix.target-triple }} -v`'
