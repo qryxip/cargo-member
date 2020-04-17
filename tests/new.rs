@@ -20,7 +20,7 @@ fn new() -> anyhow::Result<()> {
 
     let mut stderr = vec![];
 
-    cargo_member::new(tempdir.path(), &tempdir.path().join("a"))
+    cargo_member::New::new(tempdir.path(), &tempdir.path().join("a"))
         .cargo_new_registry(None::<&str>)
         .cargo_new_vcs(None::<&str>)
         .cargo_new_lib(false)

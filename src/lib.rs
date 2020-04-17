@@ -5,7 +5,8 @@ pub mod cli;
 mod fs;
 
 use anyhow::{anyhow, bail, ensure, Context as _};
-use cargo_metadata::{Metadata, MetadataCommand};
+use cargo_metadata::{Metadata, MetadataCommand, Package, Resolve};
+use easy_ext::ext;
 use ignore::{Walk, WalkBuilder};
 use itertools::Itertools as _;
 use log::debug;
@@ -14,65 +15,31 @@ use std::{
     ffi::{OsStr, OsString},
     fmt::{self, Debug, Display},
     io::{self, Sink},
-    iter,
     ops::Deref,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     slice, str, vec,
 };
 use termcolor::{ColorSpec, NoColor, WriteColor};
-
-pub fn include<I: IntoIterator<Item = P>, P: AsRef<Path>>(
-    workspace_root: &Path,
-    paths: I,
-) -> Include<NoColor<Sink>> {
-    Include::new(workspace_root, paths)
-}
-
-pub fn exclude<I: IntoIterator<Item = P>, P: AsRef<Path>>(
-    workspace_root: &Path,
-    paths: I,
-) -> Exclude<NoColor<Sink>> {
-    Exclude::new(workspace_root, paths)
-}
-
-pub fn focus(workspace_root: &Path, path: &Path) -> Focus<NoColor<Sink>> {
-    Focus::new(workspace_root, path)
-}
-
-pub fn new(workspace_root: &Path, path: &Path) -> New<NoColor<Sink>> {
-    New::new(workspace_root, path)
-}
-
-pub fn cp(workspace_root: &Path, src: &Path, dst: &Path) -> Cp<NoColor<Sink>> {
-    Cp::new(workspace_root, src, dst)
-}
-
-pub fn rm<I: IntoIterator<Item = P>, P: AsRef<Path>>(
-    workspace_root: &Path,
-    paths: I,
-) -> Rm<NoColor<Sink>> {
-    Rm::new(workspace_root, paths)
-}
-
-pub fn mv(workspace_root: &Path, src: &Path, dst: &Path) -> Mv<NoColor<Sink>> {
-    Mv::new(workspace_root, src, dst)
-}
+use url::Url;
 
 #[derive(Debug)]
 pub struct Include<W> {
-    workspace_root: PathBuf,
-    paths: Vec<PathBuf>,
+    workspace_root: anyhow::Result<PathBuf>,
+    paths: anyhow::Result<Vec<PathBuf>>,
     force: bool,
     dry_run: bool,
     stderr: W,
 }
 
 impl Include<NoColor<Sink>> {
-    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(workspace_root: &Path, paths: I) -> Self {
+    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+        workspace_root: &Path,
+        paths: Ps,
+    ) -> Self {
         Self {
-            workspace_root: workspace_root.to_owned(),
-            paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
+            workspace_root: ensure_absolute(workspace_root),
+            paths: paths.into_iter().map(ensure_absolute).collect(),
             force: false,
             dry_run: false,
             stderr: NoColor::new(io::sink()),
@@ -108,9 +75,7 @@ impl<W: WriteColor> Include<W> {
             mut stderr,
         } = self;
 
-        for path in iter::once(&workspace_root).chain(&paths) {
-            ensure_absolute(path)?;
-        }
+        let (workspace_root, paths) = (workspace_root?, paths?);
 
         let modified = paths.iter().try_fold(false, |acc, path| {
             if !(force || path.join("Cargo.toml").exists()) {
@@ -160,19 +125,51 @@ impl<W: WriteColor> Include<W> {
 
 #[derive(Debug)]
 pub struct Exclude<W> {
-    workspace_root: PathBuf,
-    paths: Vec<PathBuf>,
+    workspace_root: anyhow::Result<PathBuf>,
+    paths: anyhow::Result<Vec<PathBuf>>,
     dry_run: bool,
     stderr: W,
 }
 
 impl Exclude<NoColor<Sink>> {
-    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(workspace_root: &Path, paths: I) -> Self {
+    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+        workspace_root: &Path,
+        paths: Ps,
+    ) -> Self {
         Self {
-            stderr: NoColor::new(io::sink()),
-            workspace_root: workspace_root.to_owned(),
-            paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
+            workspace_root: ensure_absolute(workspace_root),
+            paths: paths.into_iter().map(ensure_absolute).collect(),
             dry_run: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+
+    pub fn from_metadata<
+        Ps: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+        Ss: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    >(
+        metadata: &Metadata,
+        paths: Ps,
+        specs: Ss,
+    ) -> Self {
+        Self {
+            workspace_root: Ok(metadata.workspace_root.clone()),
+            paths: paths
+                .into_iter()
+                .map(ensure_absolute)
+                .chain(specs.into_iter().map(|spec| {
+                    let member = metadata.query_for_member(Some(spec.as_ref()))?;
+                    Ok(member
+                        .manifest_path
+                        .parent()
+                        .expect(r#"`manifest_path` should end with "Cargo.toml""#)
+                        .to_owned())
+                }))
+                .collect(),
+            dry_run: false,
+            stderr: NoColor::new(io::sink()),
         }
     }
 }
@@ -199,9 +196,7 @@ impl<W: WriteColor> Exclude<W> {
             dry_run,
         } = self;
 
-        for path in iter::once(&workspace_root).chain(&paths) {
-            ensure_absolute(path)?;
-        }
+        let (workspace_root, paths) = (workspace_root?, paths?);
 
         let modified = paths.iter().try_fold(false, |acc, path| {
             modify_members(
@@ -237,8 +232,8 @@ impl<W: WriteColor> Exclude<W> {
 
 #[derive(Debug)]
 pub struct Focus<W> {
-    workspace_root: PathBuf,
-    path: PathBuf,
+    workspace_root: anyhow::Result<PathBuf>,
+    path: anyhow::Result<PathBuf>,
     dry_run: bool,
     offline: bool,
     stderr: W,
@@ -247,8 +242,8 @@ pub struct Focus<W> {
 impl Focus<NoColor<Sink>> {
     pub fn new(workspace_root: &Path, path: &Path) -> Self {
         Self {
-            workspace_root: workspace_root.to_owned(),
-            path: path.to_owned(),
+            workspace_root: ensure_absolute(workspace_root),
+            path: ensure_absolute(path),
             dry_run: false,
             offline: false,
             stderr: NoColor::new(io::sink()),
@@ -284,9 +279,7 @@ impl<W: WriteColor> Focus<W> {
             mut stderr,
         } = self;
 
-        for path in &[&workspace_root, &path] {
-            ensure_absolute(path)?;
-        }
+        let (workspace_root, path) = (workspace_root?, path?);
 
         let mut exclude = vec![];
         for entry in Walk::new(&workspace_root) {
@@ -331,8 +324,8 @@ impl<W: WriteColor> Focus<W> {
 
 #[derive(Debug)]
 pub struct New<W> {
-    workspace_root: PathBuf,
-    path: PathBuf,
+    workspace_root: anyhow::Result<PathBuf>,
+    path: anyhow::Result<PathBuf>,
     cargo_new_registry: Option<String>,
     cargo_new_vcs: Option<String>,
     cargo_new_lib: bool,
@@ -346,8 +339,8 @@ pub struct New<W> {
 impl New<NoColor<Sink>> {
     pub fn new(workspace_root: &Path, path: &Path) -> Self {
         Self {
-            workspace_root: workspace_root.to_owned(),
-            path: path.to_owned(),
+            workspace_root: ensure_absolute(workspace_root),
+            path: ensure_absolute(path),
             cargo_new_registry: None,
             cargo_new_vcs: None,
             cargo_new_lib: false,
@@ -436,7 +429,9 @@ impl<W: WriteColor> New<W> {
             mut stderr,
         } = self;
 
-        include(&workspace_root, &[&path])
+        let (workspace_root, path) = (workspace_root?, path?);
+
+        Include::new(&workspace_root, &[&path])
             .force(true)
             .dry_run(dry_run)
             .stderr(&mut stderr)
@@ -552,39 +547,42 @@ impl IntoIterator for Args {
 
 #[derive(Debug)]
 pub struct Cp<W> {
-    stderr: W,
-    workspace_root: PathBuf,
-    src: PathBuf,
-    dst: PathBuf,
+    src: anyhow::Result<PathBuf>,
+    dst: anyhow::Result<PathBuf>,
     dry_run: bool,
     no_rename: bool,
+    stderr: W,
 }
 
 impl Cp<NoColor<Sink>> {
-    pub fn new(workspace_root: &Path, src: &Path, dst: &Path) -> Self {
+    pub fn new(src: &Path, dst: &Path) -> Self {
         Self {
-            stderr: NoColor::new(io::sink()),
-            workspace_root: workspace_root.to_owned(),
-            src: src.to_owned(),
-            dst: dst.to_owned(),
+            src: ensure_absolute(src),
+            dst: ensure_absolute(dst),
             dry_run: false,
             no_rename: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+
+    pub fn from_metadata(metadata: &Metadata, src: &str, dst: &Path) -> Self {
+        Self {
+            src: metadata.query_for_member(Some(src)).map(|member| {
+                member
+                    .manifest_path
+                    .parent()
+                    .expect(r#"`manifest_path` should end with "Cargo.toml""#)
+                    .to_owned()
+            }),
+            dst: ensure_absolute(dst),
+            dry_run: false,
+            no_rename: false,
+            stderr: NoColor::new(io::sink()),
         }
     }
 }
 
 impl<W: WriteColor> Cp<W> {
-    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Cp<W2> {
-        Cp {
-            stderr,
-            workspace_root: self.workspace_root,
-            src: self.src,
-            dst: self.dst,
-            dry_run: self.dry_run,
-            no_rename: self.no_rename,
-        }
-    }
-
     pub fn dry_run(self, dry_run: bool) -> Self {
         Self { dry_run, ..self }
     }
@@ -593,19 +591,26 @@ impl<W: WriteColor> Cp<W> {
         Self { no_rename, ..self }
     }
 
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Cp<W2> {
+        Cp {
+            src: self.src,
+            dst: self.dst,
+            dry_run: self.dry_run,
+            no_rename: self.no_rename,
+            stderr,
+        }
+    }
+
     pub fn exec(self) -> anyhow::Result<()> {
         let Self {
             mut stderr,
-            workspace_root,
             src,
             dst,
             dry_run,
             no_rename,
         } = self;
 
-        for path in &[&workspace_root, &src, &dst] {
-            ensure_absolute(path)?;
-        }
+        let (src, dst) = (src?, dst?);
 
         let dst = if dst.exists() {
             dst.join(src.file_name().expect("should be absolute"))
@@ -688,26 +693,67 @@ impl<W: WriteColor> Cp<W> {
 
 #[derive(Debug)]
 pub struct Rm<W> {
-    stderr: W,
-    workspace_root: PathBuf,
-    paths: Vec<PathBuf>,
+    workspace_root: anyhow::Result<PathBuf>,
+    paths: anyhow::Result<Vec<PathBuf>>,
     force: bool,
     dry_run: bool,
+    stderr: W,
 }
 
 impl Rm<NoColor<Sink>> {
-    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(workspace_root: &Path, paths: I) -> Self {
+    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+        workspace_root: &Path,
+        paths: Ps,
+    ) -> Self {
         Self {
-            stderr: NoColor::new(io::sink()),
-            workspace_root: workspace_root.to_owned(),
-            paths: paths.into_iter().map(|p| p.as_ref().to_owned()).collect(),
+            workspace_root: ensure_absolute(workspace_root),
+            paths: paths.into_iter().map(ensure_absolute).collect(),
             force: false,
             dry_run: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+
+    pub fn from_metadata<
+        Ps: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+        Ss: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    >(
+        metadata: &Metadata,
+        paths: Ps,
+        specs: Ss,
+    ) -> Self {
+        Self {
+            workspace_root: Ok(metadata.workspace_root.clone()),
+            paths: paths
+                .into_iter()
+                .map(ensure_absolute)
+                .chain(specs.into_iter().map(|spec| {
+                    let member = metadata.query_for_member(Some(spec.as_ref()))?;
+                    Ok(member
+                        .manifest_path
+                        .parent()
+                        .expect(r#"`manifest_path` should end with "Cargo.toml""#)
+                        .to_owned())
+                }))
+                .collect(),
+            force: false,
+            dry_run: false,
+            stderr: NoColor::new(io::sink()),
         }
     }
 }
 
 impl<W: WriteColor> Rm<W> {
+    pub fn force(self, force: bool) -> Self {
+        Self { force, ..self }
+    }
+
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
     pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Rm<W2> {
         Rm {
             stderr,
@@ -716,14 +762,6 @@ impl<W: WriteColor> Rm<W> {
             force: self.force,
             dry_run: self.dry_run,
         }
-    }
-
-    pub fn force(self, force: bool) -> Self {
-        Self { force, ..self }
-    }
-
-    pub fn dry_run(self, dry_run: bool) -> Self {
-        Self { dry_run, ..self }
     }
 
     pub fn exec(self) -> anyhow::Result<()> {
@@ -735,9 +773,7 @@ impl<W: WriteColor> Rm<W> {
             dry_run,
         } = self;
 
-        for path in iter::once(&workspace_root).chain(&paths) {
-            ensure_absolute(path)?;
-        }
+        let (workspace_root, paths) = (workspace_root?, paths?);
 
         let modified = paths.iter().try_fold(false, |acc, path| {
             if !(force || path.join("Cargo.toml").exists()) {
@@ -793,28 +829,53 @@ impl<W: WriteColor> Rm<W> {
 
 #[derive(Debug)]
 pub struct Mv<W> {
-    stderr: W,
-    workspace_root: PathBuf,
-    src: PathBuf,
-    dst: PathBuf,
+    workspace_root: anyhow::Result<PathBuf>,
+    src: anyhow::Result<PathBuf>,
+    dst: anyhow::Result<PathBuf>,
     dry_run: bool,
     no_rename: bool,
+    stderr: W,
 }
 
 impl Mv<NoColor<Sink>> {
     pub fn new(workspace_root: &Path, src: &Path, dst: &Path) -> Self {
         Self {
-            stderr: NoColor::new(io::sink()),
-            workspace_root: workspace_root.to_owned(),
-            src: src.to_owned(),
-            dst: dst.to_owned(),
+            workspace_root: ensure_absolute(workspace_root),
+            src: ensure_absolute(src),
+            dst: ensure_absolute(dst),
             dry_run: false,
             no_rename: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+
+    pub fn from_metadata(metadata: &Metadata, src: &str, dst: &Path) -> Self {
+        Self {
+            workspace_root: Ok(metadata.workspace_root.clone()),
+            src: metadata.query_for_member(Some(src)).map(|member| {
+                member
+                    .manifest_path
+                    .parent()
+                    .expect(r#"`manifest_path` should end with "Cargo.toml""#)
+                    .to_owned()
+            }),
+            dst: ensure_absolute(dst),
+            dry_run: false,
+            no_rename: false,
+            stderr: NoColor::new(io::sink()),
         }
     }
 }
 
 impl<W: WriteColor> Mv<W> {
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn no_rename(self, no_rename: bool) -> Self {
+        Self { no_rename, ..self }
+    }
+
     pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Mv<W2> {
         Mv {
             stderr,
@@ -824,14 +885,6 @@ impl<W: WriteColor> Mv<W> {
             dry_run: self.dry_run,
             no_rename: self.no_rename,
         }
-    }
-
-    pub fn dry_run(self, dry_run: bool) -> Self {
-        Self { dry_run, ..self }
-    }
-
-    pub fn no_rename(self, no_rename: bool) -> Self {
-        Self { no_rename, ..self }
     }
 
     pub fn exec(self) -> anyhow::Result<()> {
@@ -844,22 +897,25 @@ impl<W: WriteColor> Mv<W> {
             no_rename,
         } = self;
 
-        cp(&workspace_root, &src, &dst)
+        let (workspace_root, src, dst) = (workspace_root?, src?, dst?);
+
+        Cp::new(&src, &dst)
             .dry_run(dry_run)
             .no_rename(no_rename)
             .stderr(&mut stderr)
             .exec()?;
 
-        rm(&workspace_root, &[src])
+        Rm::new(&workspace_root, &[src])
             .dry_run(dry_run)
             .stderr(stderr)
             .exec()
     }
 }
 
-fn ensure_absolute(path: &Path) -> anyhow::Result<()> {
+fn ensure_absolute(path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+    let path = path.as_ref();
     ensure!(path.is_absolute(), "must be absolute: {}", path.display());
-    Ok(())
+    Ok(path.to_owned())
 }
 
 fn cargo_metadata(
@@ -1026,3 +1082,57 @@ trait WriteColorExt: WriteColor {
 }
 
 impl<W: WriteColor> WriteColorExt for W {}
+
+#[ext(MetadataExt)]
+impl Metadata {
+    fn query_for_member<'a>(&'a self, spec: Option<&str>) -> anyhow::Result<&'a Package> {
+        let cargo_exe = env::var_os("CARGO").with_context(|| "`$CARGO` should be present")?;
+
+        let manifest_path = self
+            .resolve
+            .as_ref()
+            .and_then(|Resolve { root, .. }| root.as_ref())
+            .map(|id| self[id].manifest_path.clone())
+            .unwrap_or_else(|| self.workspace_root.join("Cargo.toml"));
+
+        let args = [
+            Some("pkgid".as_ref()),
+            Some("--manifest-path".as_ref()),
+            Some(manifest_path.as_ref()),
+            spec.map(OsStr::new),
+        ];
+        let args = args.iter().flatten();
+        let output = duct::cmd(cargo_exe, args)
+            .dir(&self.workspace_root)
+            .stdout_capture()
+            .stderr_capture()
+            .unchecked()
+            .run()?;
+        let stdout = str::from_utf8(&output.stdout)?.trim_end();
+        let stderr = str::from_utf8(&output.stderr)?.trim_end();
+        if !output.status.success() {
+            bail!("{}", stderr.trim_start_matches("error: "));
+        }
+
+        let url = stdout.parse::<Url>()?;
+        let fragment = url.fragment().expect("the URL should contain fragment");
+        let spec_name = match *fragment.splitn(2, ':').collect::<Vec<_>>() {
+            [name, _] => name,
+            [_] => url
+                .path_segments()
+                .and_then(Iterator::last)
+                .expect("should contain name"),
+            _ => unreachable!(),
+        };
+
+        self.packages
+            .iter()
+            .find(|Package { id, name, .. }| {
+                self.workspace_members.contains(id) && name == spec_name
+            })
+            .with_context(|| {
+                let spec = spec.expect("should be present here");
+                format!("package `{}` is not a member of the workspace", spec)
+            })
+    }
+}

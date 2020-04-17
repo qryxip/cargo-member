@@ -1,6 +1,6 @@
 #![warn(rust_2018_idioms)]
 
-use cargo_metadata::MetadataCommand;
+use cargo_metadata::{Metadata, MetadataCommand};
 use difference::assert_diff;
 use duct::cmd;
 use std::{
@@ -15,16 +15,19 @@ use termcolor::NoColor;
 fn rm() -> anyhow::Result<()> {
     let tempdir = TempDir::new("cargo-member-test-rm")?;
 
-    let expected_stderr =
-        EXPECTED_STDERR.replace("{{path}}", &tempdir.path().join("b").to_string_lossy());
+    let expected_stderr = EXPECTED_STDERR
+        .replace("{{b}}", &tempdir.path().join("b").to_string_lossy())
+        .replace("{{c}}", &tempdir.path().join("c").to_string_lossy());
 
     fs::write(tempdir.path().join("Cargo.toml"), ORIGINAL)?;
     cargo_new(&tempdir.path().join("a"))?;
     cargo_new(&tempdir.path().join("b"))?;
+    cargo_new(&tempdir.path().join("c"))?;
+    let metadata = cargo_metadata(&tempdir.path().join("Cargo.toml"), &[])?;
 
     let mut stderr = vec![];
 
-    cargo_member::rm(tempdir.path(), &[tempdir.path().join("b")])
+    cargo_member::Rm::from_metadata(&metadata, &[tempdir.path().join("b")], &["c"])
         .force(false)
         .dry_run(false)
         .stderr(NoColor::new(&mut stderr))
@@ -36,7 +39,7 @@ fn rm() -> anyhow::Result<()> {
     return Ok(());
 
     static ORIGINAL: &str = r#"[workspace]
-members = ["a", "b"]
+members = ["a", "b", "c"]
 exclude = []
 "#;
 
@@ -45,8 +48,10 @@ members = ["a"]
 exclude = []
 "#;
 
-    static EXPECTED_STDERR: &str = r#"    Removing directory `{{path}}`
+    static EXPECTED_STDERR: &str = r#"    Removing directory `{{b}}`
     Removing "b" from `workspace.members`
+    Removing directory `{{c}}`
+    Removing "c" from `workspace.members`
 "#;
 }
 
@@ -67,7 +72,7 @@ fn assert_stderr(stderr: &[u8], expected: &str) -> std::result::Result<(), Utf8E
     Ok(())
 }
 
-fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result<()> {
+fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result<Metadata> {
     let opts = opts
         .iter()
         .copied()
@@ -78,5 +83,4 @@ fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result
         .manifest_path(manifest_path)
         .other_options(&opts)
         .exec()
-        .map(drop)
 }

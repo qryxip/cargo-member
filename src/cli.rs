@@ -1,10 +1,10 @@
-use anyhow::{ensure, Context as _};
-use cargo_metadata::{Metadata, Package, Resolve};
+use crate::{Cp, Exclude, Focus, Include, Mv, New, Rm};
+use anyhow::Context as _;
+use cargo_metadata::Metadata;
 use easy_ext::ext;
 use env_logger::fmt::WriteStyle;
 use std::{
     env,
-    ffi::OsStr,
     io::Write as _,
     path::{Path, PathBuf},
     process::{self, Stdio},
@@ -13,7 +13,6 @@ use std::{
 use structopt::{clap::AppSettings, StructOpt};
 use strum::{EnumString, EnumVariantNames, IntoStaticStr, VariantNames as _};
 use termcolor::{BufferedStandardStream, ColorSpec, WriteColor};
-use url::Url;
 
 #[derive(StructOpt, Debug)]
 #[structopt(
@@ -408,7 +407,8 @@ fn include(opt: CargoMemberInclude, ctx: Context<impl WriteColor>) -> anyhow::Re
     let Metadata { workspace_root, .. } =
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
     let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
-    crate::include(&workspace_root, paths)
+
+    Include::new(&workspace_root, paths)
         .force(force)
         .dry_run(dry_run)
         .stderr(stderr)
@@ -429,20 +429,9 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
 
     let metadata =
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
-    let paths = paths
-        .into_iter()
-        .map(|p| Ok(cwd.join(p.trim_leading_dots())))
-        .chain(package.into_iter().map(|spec| {
-            let member = metadata.query_for_member(Some(&spec))?;
-            Ok(member
-                .manifest_path
-                .parent()
-                .expect(r#"`manifest_path` should end with "Cargo.toml""#)
-                .to_owned())
-        }))
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
 
-    crate::exclude(&metadata.workspace_root, paths)
+    Exclude::from_metadata(&metadata, paths, package)
         .dry_run(dry_run)
         .stderr(stderr)
         .exec()
@@ -463,7 +452,7 @@ fn focus(opt: CargoMemberFocus, ctx: Context<impl WriteColor>) -> anyhow::Result
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
     let path = cwd.join(path.trim_leading_dots());
 
-    crate::focus(&workspace_root, &path)
+    Focus::new(&workspace_root, &path)
         .dry_run(dry_run)
         .offline(offline)
         .stderr(stderr)
@@ -493,7 +482,7 @@ fn new(opt: CargoMemberNew, ctx: Context<impl WriteColor>) -> anyhow::Result<()>
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
     let path = cwd.join(path.trim_leading_dots());
 
-    crate::new(&workspace_root, &path)
+    New::new(&workspace_root, &path)
         .cargo_new_registry(registry)
         .cargo_new_vcs(vcs)
         .cargo_new_lib(lib)
@@ -520,14 +509,9 @@ fn cp(opt: CargoMemberCp, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     let metadata =
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
-    let src = metadata
-        .query_for_member(Some(&src))?
-        .manifest_path
-        .parent()
-        .expect(r#"`manifest_path` should end with "Cargo.toml""#);
     let dst = cwd.join(dst.trim_leading_dots());
 
-    crate::cp(&metadata.workspace_root, &src, &dst)
+    Cp::from_metadata(&metadata, &src, &dst)
         .dry_run(dry_run)
         .no_rename(no_rename)
         .stderr(stderr)
@@ -549,20 +533,9 @@ fn rm(opt: CargoMemberRm, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     let metadata =
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
-    let paths = paths
-        .into_iter()
-        .map(|p| Ok(cwd.join(p.trim_leading_dots())))
-        .chain(package.into_iter().map(|spec| {
-            let member = metadata.query_for_member(Some(&spec))?;
-            Ok(member
-                .manifest_path
-                .parent()
-                .expect(r#"`manifest_path` should end with "Cargo.toml""#)
-                .to_owned())
-        }))
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
 
-    crate::rm(&metadata.workspace_root, &paths)
+    Rm::from_metadata(&metadata, paths, package)
         .force(force)
         .dry_run(dry_run)
         .stderr(stderr)
@@ -584,14 +557,9 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
 
     let metadata =
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
-    let src = metadata
-        .query_for_member(Some(&src))?
-        .manifest_path
-        .parent()
-        .expect(r#"`manifest_path` should end with "Cargo.toml""#);
     let dst = cwd.join(dst.trim_leading_dots());
 
-    crate::mv(&metadata.workspace_root, &src, &dst)
+    Mv::from_metadata(&metadata, &src, &dst)
         .dry_run(dry_run)
         .no_rename(no_rename)
         .stderr(stderr)
@@ -606,57 +574,5 @@ impl Path {
             acc = removed;
         }
         acc
-    }
-}
-
-#[ext(MetadataExt)]
-impl Metadata {
-    fn query_for_member<'a>(&'a self, spec: Option<&str>) -> anyhow::Result<&'a Package> {
-        let cargo_exe = env::var_os("CARGO").with_context(|| "`$CARGO` should be present")?;
-
-        let manifest_path = self
-            .resolve
-            .as_ref()
-            .and_then(|Resolve { root, .. }| root.as_ref())
-            .map(|id| self[id].manifest_path.clone())
-            .unwrap_or_else(|| self.workspace_root.join("Cargo.toml"));
-
-        let args = [
-            Some("pkgid".as_ref()),
-            Some("--manifest-path".as_ref()),
-            Some(manifest_path.as_ref()),
-            spec.map(OsStr::new),
-        ];
-        let args = args.iter().flatten();
-        let output = duct::cmd(cargo_exe, args)
-            .dir(&self.workspace_root)
-            .stdout_capture()
-            .stderr_capture()
-            .unchecked()
-            .run()?;
-        let stdout = str::from_utf8(&output.stdout)?.trim_end();
-        let stderr = str::from_utf8(&output.stderr)?.trim_end();
-        ensure!(output.status.success(), "{}", stderr);
-
-        let url = stdout.parse::<Url>()?;
-        let fragment = url.fragment().expect("the URL should contain fragment");
-        let spec_name = match *fragment.splitn(2, ':').collect::<Vec<_>>() {
-            [name, _] => name,
-            [_] => url
-                .path_segments()
-                .and_then(Iterator::last)
-                .expect("should contain name"),
-            _ => unreachable!(),
-        };
-
-        self.packages
-            .iter()
-            .find(|Package { id, name, .. }| {
-                self.workspace_members.contains(id) && name == spec_name
-            })
-            .with_context(|| {
-                let spec = spec.expect("should be present here");
-                format!("package `{}` is not a member of the workspace", spec)
-            })
     }
 }

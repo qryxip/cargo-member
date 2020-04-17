@@ -21,7 +21,7 @@ fn normal() -> anyhow::Result<()> {
 
     let mut stderr = vec![];
 
-    cargo_member::include(tempdir.path(), &[tempdir.path().join("b")])
+    cargo_member::Include::new(tempdir.path(), &[tempdir.path().join("b")])
         .force(false)
         .dry_run(false)
         .stderr(NoColor::new(&mut stderr))
@@ -55,7 +55,7 @@ fn force_nonexisting() -> anyhow::Result<()> {
 
     let mut stderr = vec![];
 
-    cargo_member::include(tempdir.path(), &[tempdir.path().join("nonexisting")])
+    cargo_member::Include::new(tempdir.path(), &[tempdir.path().join("nonexisting")])
         .force(true)
         .dry_run(false)
         .stderr(NoColor::new(&mut stderr))
@@ -91,7 +91,7 @@ fn dry_run() -> anyhow::Result<()> {
 
     let mut stderr = vec![];
 
-    cargo_member::include(tempdir.path(), &[tempdir.path().join("b")])
+    cargo_member::Include::new(tempdir.path(), &[tempdir.path().join("b")])
         .force(false)
         .dry_run(true)
         .stderr(NoColor::new(&mut stderr))

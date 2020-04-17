@@ -1,6 +1,6 @@
 #![warn(rust_2018_idioms)]
 
-use cargo_metadata::MetadataCommand;
+use cargo_metadata::{Metadata, MetadataCommand};
 use difference::assert_diff;
 use duct::cmd;
 use std::{
@@ -26,18 +26,14 @@ fn cp() -> anyhow::Result<()> {
     fs::write(tempdir.path().join("ws").join("Cargo.toml"), MANIFEST)?;
     cargo_new(&tempdir.path().join("ws").join("a"))?;
     cargo_new(&tempdir.path().join("ws").join("b"))?;
-    cargo_metadata(&tempdir.path().join("ws").join("Cargo.toml"), &[])?;
+    let metadata = cargo_metadata(&tempdir.path().join("ws").join("Cargo.toml"), &[])?;
 
     let mut stderr = vec![];
 
-    cargo_member::cp(
-        &tempdir.path().join("ws"),
-        &tempdir.path().join("ws").join("b"),
-        &tempdir.path().join("b"),
-    )
-    .dry_run(false)
-    .stderr(NoColor::new(&mut stderr))
-    .exec()?;
+    cargo_member::Cp::from_metadata(&metadata, "b", &tempdir.path().join("b"))
+        .dry_run(false)
+        .stderr(NoColor::new(&mut stderr))
+        .exec()?;
 
     assert_manifest(&tempdir.path().join("ws").join("Cargo.toml"), MANIFEST)?;
     assert_stderr(&stderr, &expected_stderr)?;
@@ -72,7 +68,7 @@ fn assert_stderr(stderr: &[u8], expected: &str) -> std::result::Result<(), Utf8E
     Ok(())
 }
 
-fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result<()> {
+fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result<Metadata> {
     let opts = opts
         .iter()
         .copied()
@@ -83,5 +79,4 @@ fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result
         .manifest_path(manifest_path)
         .other_options(&opts)
         .exec()
-        .map(drop)
 }
