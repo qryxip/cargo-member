@@ -27,7 +27,8 @@ jobs:
         with:
           toolchain: stable-x86_64-unknown-linux-gnu
           default: true
-          profile: default
+          profile: minimal
+          components: rustfmt
 
       - name: '`cargo fmt -- --check`'
         uses: actions-rs/cargo@v1
@@ -109,7 +110,8 @@ jobs:
           toolchain: ${{ matrix.channel }}-${{ matrix.host-triple }}
           target: ${{ matrix.target-triple }}
           default: true
-          profile: default
+          profile: minimal
+          components: clippy
 
       - name: '`cargo clippy --all-targets --target ${{ matrix.target-triple }} -v -- -D warnings`'
         uses: actions-rs/cargo@v1
