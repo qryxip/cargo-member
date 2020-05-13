@@ -112,6 +112,6 @@ fn cargo_metadata(manifest_path: &Path, opts: &[&str]) -> cargo_metadata::Result
 
     MetadataCommand::new()
         .manifest_path(manifest_path)
-        .other_options(&opts)
+        .other_options(opts.iter().map(ToOwned::to_owned).collect::<Vec<_>>())
         .exec()
 }
