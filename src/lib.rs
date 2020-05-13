@@ -930,13 +930,13 @@ fn cargo_metadata(
         cmd.manifest_path(manifest_path);
     }
     if frozen {
-        cmd.other_options(&["--frozen".to_owned()]);
+        cmd.other_options(vec!["--frozen".to_owned()]);
     }
     if offline {
-        cmd.other_options(&["--offline".to_owned()]);
+        cmd.other_options(vec!["--offline".to_owned()]);
     }
     if locked {
-        cmd.other_options(&["--locked".to_owned()]);
+        cmd.other_options(vec!["--locked".to_owned()]);
     }
     let metadata = cmd.current_dir(cwd).exec().map_err(|err| match err {
         cargo_metadata::Error::CargoMetadata { stderr } => anyhow!("{}", stderr.trim_end()),
