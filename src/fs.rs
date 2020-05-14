@@ -1,15 +1,27 @@
 use anyhow::Context as _;
 use log::debug;
+use serde::de::DeserializeOwned;
 use std::path::Path;
+
+pub(crate) fn read_toml<T: DeserializeOwned, P: AsRef<Path>>(path: P) -> anyhow::Result<T> {
+    let path = path.as_ref();
+    let toml = toml::from_str(&read_to_string(path)?)
+        .with_context(|| format!("failed to parse the TOML file at {}", path.display()))?;
+    debug!("Read the TOML file at {}", path.display());
+    Ok(toml)
+}
 
 pub(crate) fn read_toml_edit(path: impl AsRef<Path>) -> anyhow::Result<toml_edit::Document> {
     let path = path.as_ref();
-    let edit = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?
+    let edit = read_to_string(path)?
         .parse()
         .with_context(|| format!("failed to parse the TOML file at {}", path.display()))?;
     debug!("Read the TOML file at {}", path.display());
     Ok(edit)
+}
+
+fn read_to_string(path: &Path) -> anyhow::Result<String> {
+    std::fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))
 }
 
 pub(crate) fn write(

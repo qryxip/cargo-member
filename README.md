@@ -27,24 +27,19 @@ $ tree "$PWD"
 │   ├── Cargo.toml
 │   └── src
 │       └── main.rs
-├── b
-│   ├── Cargo.toml
-│   └── src
-│       └── main.rs
-├── Cargo.lock
 └── Cargo.toml
 
-4 directories, 6 files
+2 directories, 3 files
+$ cat ./Cargo.toml
+[workspace]
+$ cargo member include ./a
+      Adding "a" to `workspace.members`
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
 exclude = []
-$ cargo member include ./b
-      Adding "b" to `workspace.members`
-$ cat ./Cargo.toml
-[workspace]
-members = ["a", "b"]
-exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages[] | .name'
+a
 ```
 
 ### `cargo member exclude`
@@ -56,25 +51,20 @@ $ tree "$PWD"
 │   ├── Cargo.toml
 │   └── src
 │       └── main.rs
-├── b
-│   ├── Cargo.toml
-│   └── src
-│       └── main.rs
 ├── Cargo.lock
 └── Cargo.toml
 
-4 directories, 6 files
-$ cat ./Cargo.toml
-[workspace]
-members = ["a", "b"]
-exclude = []
-$ cargo member exclude ./b # or `-p b`
-    Removing "b" from `workspace.members`
-      Adding "b" to `workspace.exclude`
+2 directories, 4 files
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
-exclude = ["b"]
+$ cargo member exclude ./a # or `-p a`
+    Removing "a" from `workspace.members`
+      Adding "a" to `workspace.exclude`
+$ cat ./Cargo.toml
+[workspace]
+members = []
+exclude = ["a"]
 ```
 
 ### `cargo member focus`
@@ -116,6 +106,14 @@ exclude = ["b", "c"]
 ### `cargo member new`
 
 ```console
+❯ tree "$PWD"
+/home/ryo/src/local/workspace
+
+0 directories, 0 files
+$ echo '[workspace]' > ./Cargo.toml
+$ cargo member new a
+     Created binary (application) `/home/ryo/src/local/workspace/a` package
+      Adding "a" to `workspace.members`
 $ tree "$PWD"
 /home/ryo/src/local/workspace
 ├── a
@@ -126,16 +124,12 @@ $ tree "$PWD"
 └── Cargo.toml
 
 2 directories, 4 files
-$ cargo member new b
-     Created binary (application) `/home/ryo/src/local/workspace/b` package
-      Adding "b" to `workspace.members`
 $ cat ./Cargo.toml
 [workspace]
-members = ["a", "b"]
+members = ["a"]
 exclude = []
-$ cargo metadata --format-version 1 | jq -r '.packages | map(.name) | sort[]'
+$ cargo metadata --format-version 1 | jq -r '.packages[] | .name'
 a
-b
 ```
 
 ### `cargo member cp`
@@ -191,27 +185,6 @@ $ tree "$PWD"
 │   ├── Cargo.toml
 │   └── src
 │       └── main.rs
-├── b
-│   ├── Cargo.toml
-│   └── src
-│       └── main.rs
-├── Cargo.lock
-└── Cargo.toml
-
-4 directories, 6 files
-$ cat ./Cargo.toml
-[workspace]
-members = ["a", "b"]
-exclude = []
-$ cargo member rm ./b # or `-p b`
-    Removing directory `/home/ryo/src/local/workspace/b`
-    Removing "b" from `workspace.members`
-$ tree "$PWD"
-/home/ryo/src/local/workspace
-├── a
-│   ├── Cargo.toml
-│   └── src
-│       └── main.rs
 ├── Cargo.lock
 └── Cargo.toml
 
@@ -219,6 +192,19 @@ $ tree "$PWD"
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
+exclude = []
+$ cargo member rm ./a # or `-p a`
+    Removing directory `/home/ryo/src/local/workspace/a`
+    Removing "a" from `workspace.members`
+$ tree "$PWD"
+/home/ryo/src/local/workspace
+├── Cargo.lock
+└── Cargo.toml
+
+0 directories, 2 files
+$ cat ./Cargo.toml
+[workspace]
+members = []
 exclude = []
 ```
 
