@@ -10,6 +10,7 @@ use easy_ext::ext;
 use ignore::{Walk, WalkBuilder};
 use itertools::Itertools as _;
 use log::debug;
+use serde::Deserialize;
 use std::{
     env,
     ffi::{OsStr, OsString},
@@ -25,23 +26,25 @@ use url::Url;
 
 #[derive(Debug)]
 pub struct Include<W> {
-    workspace_root: anyhow::Result<PathBuf>,
+    possibly_empty_workspace_root: anyhow::Result<PathBuf>,
     paths: anyhow::Result<Vec<PathBuf>>,
     force: bool,
     dry_run: bool,
+    offline: bool,
     stderr: W,
 }
 
 impl Include<NoColor<Sink>> {
     pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
-        workspace_root: &Path,
+        possibly_empty_workspace_root: &Path,
         paths: Ps,
     ) -> Self {
         Self {
-            workspace_root: ensure_absolute(workspace_root),
+            possibly_empty_workspace_root: ensure_absolute(possibly_empty_workspace_root),
             paths: paths.into_iter().map(ensure_absolute).collect(),
             force: false,
             dry_run: false,
+            offline: false,
             stderr: NoColor::new(io::sink()),
         }
     }
@@ -56,26 +59,32 @@ impl<W: WriteColor> Include<W> {
         Self { dry_run, ..self }
     }
 
+    pub fn offline(self, offline: bool) -> Self {
+        Self { offline, ..self }
+    }
+
     pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Include<W2> {
         Include {
-            workspace_root: self.workspace_root,
+            possibly_empty_workspace_root: self.possibly_empty_workspace_root,
             paths: self.paths,
             force: self.force,
             dry_run: self.dry_run,
+            offline: self.offline,
             stderr,
         }
     }
 
     pub fn exec(self) -> anyhow::Result<()> {
         let Self {
-            workspace_root,
+            possibly_empty_workspace_root,
             paths,
             force,
             dry_run,
+            offline,
             mut stderr,
         } = self;
 
-        let (workspace_root, paths) = (workspace_root?, paths?);
+        let (possibly_empty_workspace_root, paths) = (possibly_empty_workspace_root?, paths?);
 
         let modified = paths.iter().try_fold(false, |acc, path| {
             if !(force || path.join("Cargo.toml").exists()) {
@@ -89,7 +98,7 @@ impl<W: WriteColor> Include<W> {
                 );
             }
             modify_members(
-                &workspace_root,
+                &possibly_empty_workspace_root,
                 &[path],
                 &[],
                 &[],
@@ -108,11 +117,11 @@ impl<W: WriteColor> Include<W> {
             stderr.warn("not modifying the manifest due to dry run")?;
         } else {
             let result = cargo_metadata(
-                Some(&workspace_root.join("Cargo.toml")),
+                Some(&possibly_empty_workspace_root.join("Cargo.toml")),
                 false,
                 false,
-                false,
-                &workspace_root,
+                offline,
+                &possibly_empty_workspace_root,
             );
 
             if !force {
@@ -218,8 +227,8 @@ impl<W: WriteColor> Exclude<W> {
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
         } else {
-            cargo_metadata(
-                Some(&workspace_root.join("Cargo.toml")),
+            cargo_metadata_unless_empty(
+                &workspace_root.join("Cargo.toml"),
                 false,
                 false,
                 false,
@@ -324,7 +333,7 @@ impl<W: WriteColor> Focus<W> {
 
 #[derive(Debug)]
 pub struct New<W> {
-    workspace_root: anyhow::Result<PathBuf>,
+    possibly_empty_workspace_root: anyhow::Result<PathBuf>,
     path: anyhow::Result<PathBuf>,
     cargo_new_registry: Option<String>,
     cargo_new_vcs: Option<String>,
@@ -337,9 +346,9 @@ pub struct New<W> {
 }
 
 impl New<NoColor<Sink>> {
-    pub fn new(workspace_root: &Path, path: &Path) -> Self {
+    pub fn new(possibly_empty_workspace_root: &Path, path: &Path) -> Self {
         Self {
-            workspace_root: ensure_absolute(workspace_root),
+            possibly_empty_workspace_root: ensure_absolute(possibly_empty_workspace_root),
             path: ensure_absolute(path),
             cargo_new_registry: None,
             cargo_new_vcs: None,
@@ -402,7 +411,7 @@ impl<W: WriteColor> New<W> {
 
     pub fn stderr<W2: WriteColor>(self, stderr: W2) -> New<W2> {
         New {
-            workspace_root: self.workspace_root,
+            possibly_empty_workspace_root: self.possibly_empty_workspace_root,
             path: self.path,
             cargo_new_registry: self.cargo_new_registry,
             cargo_new_vcs: self.cargo_new_vcs,
@@ -417,7 +426,7 @@ impl<W: WriteColor> New<W> {
 
     pub fn exec(self) -> anyhow::Result<()> {
         let Self {
-            workspace_root,
+            possibly_empty_workspace_root,
             path,
             cargo_new_registry,
             cargo_new_vcs,
@@ -429,9 +438,9 @@ impl<W: WriteColor> New<W> {
             mut stderr,
         } = self;
 
-        let (workspace_root, path) = (workspace_root?, path?);
+        let (possibly_empty_workspace_root, path) = (possibly_empty_workspace_root?, path?);
 
-        Include::new(&workspace_root, &[&path])
+        Include::new(&possibly_empty_workspace_root, &[&path])
             .force(true)
             .dry_run(dry_run)
             .stderr(&mut stderr)
@@ -453,7 +462,7 @@ impl<W: WriteColor> New<W> {
 
             let output = Command::new(&cargo_exe)
                 .args(&args)
-                .current_dir(&workspace_root)
+                .current_dir(&possibly_empty_workspace_root)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(cargo_new_stderr_redirection)
@@ -474,13 +483,7 @@ impl<W: WriteColor> New<W> {
                 );
             }
 
-            cargo_metadata(
-                Some(&workspace_root.join("Cargo.toml")),
-                false,
-                false,
-                offline,
-                &workspace_root,
-            )?;
+            cargo_metadata(None, false, false, offline, &possibly_empty_workspace_root)?;
         }
         Ok(())
     }
@@ -811,8 +814,8 @@ impl<W: WriteColor> Rm<W> {
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
         } else {
-            let result = cargo_metadata(
-                Some(&workspace_root.join("Cargo.toml")),
+            let result = cargo_metadata_unless_empty(
+                &workspace_root.join("Cargo.toml"),
                 false,
                 false,
                 false,
@@ -918,6 +921,32 @@ fn ensure_absolute(path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     Ok(path.to_owned())
 }
 
+fn cargo_metadata_unless_empty(
+    manifest_path: &Path,
+    frozen: bool,
+    locked: bool,
+    offline: bool,
+    cwd: &Path,
+) -> anyhow::Result<()> {
+    let CargoToml { workspace, package } = crate::fs::read_toml(manifest_path)?;
+    if !workspace.members.is_empty() || package.is_some() {
+        cargo_metadata(Some(manifest_path), frozen, locked, offline, cwd)?;
+    }
+    return Ok(());
+
+    #[derive(Deserialize)]
+    struct CargoToml {
+        #[serde(default)]
+        workspace: CargoTomlWorkspace,
+        package: Option<toml::Value>,
+    }
+
+    #[derive(Deserialize, Default)]
+    struct CargoTomlWorkspace {
+        members: Vec<String>,
+    }
+}
+
 fn cargo_metadata(
     manifest_path: Option<&Path>,
     frozen: bool,
@@ -947,7 +976,7 @@ fn cargo_metadata(
 }
 
 fn modify_members<'a>(
-    workspace_root: &Path,
+    possibly_empty_workspace_root: &Path,
     add_to_workspace_members: &[&'a Path],
     add_to_workspace_exclude: &[&'a Path],
     rm_from_workspace_members: &[&'a Path],
@@ -964,12 +993,15 @@ fn modify_members<'a>(
     .iter()
     .copied()
     .flatten()
-    .any(|&p| p == workspace_root)
+    .any(|&p| p == possibly_empty_workspace_root)
     {
-        bail!("`{}` is the workspace root", workspace_root.display());
+        bail!(
+            "`{}` is the workspace root",
+            possibly_empty_workspace_root.display()
+        );
     }
 
-    let manifest_path = workspace_root.join("Cargo.toml");
+    let manifest_path = possibly_empty_workspace_root.join("Cargo.toml");
     let mut cargo_toml = crate::fs::read_toml_edit(&manifest_path)?;
     let orig = cargo_toml.to_string();
 
@@ -986,14 +1018,16 @@ fn modify_members<'a>(
         ),
     ] {
         let relative_to_root = |path: &'a Path| -> _ {
-            let path = path.strip_prefix(workspace_root).unwrap_or(path);
+            let path = path
+                .strip_prefix(possibly_empty_workspace_root)
+                .unwrap_or(path);
             path.to_str()
                 .with_context(|| format!("{:?} is not valid UTF-8 path", path))
         };
 
         let same_paths = |value: &toml_edit::Value, target: &str| -> _ {
             value.as_str().map_or(false, |s| {
-                workspace_root.join(s) == workspace_root.join(target)
+                possibly_empty_workspace_root.join(s) == possibly_empty_workspace_root.join(target)
             })
         };
 

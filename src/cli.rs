@@ -1,8 +1,9 @@
 use crate::{Cp, Exclude, Focus, Include, Mv, New, Rm};
-use anyhow::Context as _;
+use anyhow::{bail, Context as _};
 use cargo_metadata::Metadata;
 use easy_ext::ext;
 use env_logger::fmt::WriteStyle;
+use serde::Deserialize;
 use std::{
     env,
     io::Write as _,
@@ -404,12 +405,12 @@ fn include(opt: CargoMemberInclude, ctx: Context<impl WriteColor>) -> anyhow::Re
 
     let Context { cwd, stderr, .. } = ctx;
 
-    let Metadata { workspace_root, .. } =
-        crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
+    let possibly_empty_workspace_root = find_root_manifest(manifest_path.as_deref(), &cwd)?;
     let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
 
-    Include::new(&workspace_root, paths)
+    Include::new(&possibly_empty_workspace_root, paths)
         .force(force)
+        .offline(offline)
         .dry_run(dry_run)
         .stderr(stderr)
         .exec()
@@ -478,11 +479,10 @@ fn new(opt: CargoMemberNew, ctx: Context<impl WriteColor>) -> anyhow::Result<()>
         stderr_redirection,
     } = ctx;
 
-    let Metadata { workspace_root, .. } =
-        crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
+    let possibly_empty_workspace_root = find_root_manifest(manifest_path.as_deref(), &cwd)?;
     let path = cwd.join(path.trim_leading_dots());
 
-    New::new(&workspace_root, &path)
+    New::new(&possibly_empty_workspace_root, &path)
         .cargo_new_registry(registry)
         .cargo_new_vcs(vcs)
         .cargo_new_lib(lib)
@@ -564,6 +564,44 @@ fn mv(opt: CargoMemberMv, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
         .no_rename(no_rename)
         .stderr(stderr)
         .exec()
+}
+
+fn find_root_manifest(manifest_path: Option<&Path>, cwd: &Path) -> anyhow::Result<PathBuf> {
+    let mut path = cargo_locate_project(manifest_path, cwd)?;
+    path.pop();
+    return Ok(path);
+
+    fn cargo_locate_project(manifest_path: Option<&Path>, cwd: &Path) -> anyhow::Result<PathBuf> {
+        let program = env::var_os("CARGO").with_context(|| "`$CARGO` should be present")?;
+
+        let mut args = vec!["locate-project".as_ref()];
+        if let Some(manifest_path) = manifest_path {
+            args.push("--manifest-path".as_ref());
+            args.push(manifest_path.as_os_str());
+        }
+
+        let output = duct::cmd(program, args)
+            .stdout_capture()
+            .stderr_capture()
+            .dir(cwd)
+            .unchecked()
+            .run()?;
+
+        let stdout = str::from_utf8(&output.stdout)?.trim_end();
+        let stderr = str::from_utf8(&output.stderr)?.trim_end();
+
+        if !output.status.success() {
+            bail!("{}", stderr.trim_start_matches("error: "));
+        }
+
+        let ProjectLocation { root } = serde_json::from_str(stdout)?;
+        return Ok(root);
+
+        #[derive(Deserialize)]
+        struct ProjectLocation {
+            root: PathBuf,
+        }
+    }
 }
 
 #[ext(PathExt)]

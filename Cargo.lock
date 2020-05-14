@@ -20,9 +20,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.29"
+version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc98824304f5513bb8f862f9e5985219003de4d730689e59d8f28818283a6fe4"
+checksum = "2494382e9ba43995f3c56359e518641f450f5c36feeb4632a75cde2ec297c867"
 
 [[package]]
 name = "ascii"
@@ -83,11 +83,14 @@ dependencies = [
  "itertools",
  "log",
  "remove_dir_all",
+ "serde",
+ "serde_json",
  "shell-escape",
  "structopt",
  "strum",
  "tempdir",
  "termcolor",
+ "toml",
  "toml_edit",
  "url",
 ]
@@ -363,9 +366,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.3.1"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1c601810575c99596d4afc46f78a678c80105117c379eb3650cf99b8a21ce5b"
+checksum = "0b631f7e854af39a1739f401cf34a8a013dfe09eac4fa4dba91e9768bd28168d"
 
 [[package]]
 name = "os_pipe"
@@ -533,6 +536,9 @@ name = "serde"
 version = "1.0.110"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99e7b308464d16b56eba9964e4972a3eee817760ab60d88c3f86e1fecb08204c"
+dependencies = [
+ "serde_derive",
+]
 
 [[package]]
 name = "serde_derive"
@@ -696,6 +702,15 @@ checksum = "ca8a50ef2360fbd1eeb0ecd46795a87a19024eb4b53c5dc916ca1fd95fe62438"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "toml"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffc92d160b1eef40665be3a05630d003936a3bc7da7421277846c2613e92c71a"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
