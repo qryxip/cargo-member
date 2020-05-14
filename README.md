@@ -2,13 +2,18 @@
 
 [![CI](https://github.com/qryxip/cargo-member/workflows/CI/badge.svg)](https://github.com/qryxip/cargo-member/actions?workflow=CI)
 [![codecov](https://codecov.io/gh/qryxip/cargo-member/branch/master/graph/badge.svg)](https://codecov.io/gh/qryxip/cargo-member/branch/master)
-[![dependency status](https://deps.rs/repo/github/qryxip/cargo-member/status.svg)](https://deps.rs/repo/github/qryxip/cargo-member)
-[![Crates.io](https://img.shields.io/badge/crates.io-not%20yet-inactive)](https://crates.io)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-informational)](https://crates.io)
+[![Crates.io](https://img.shields.io/crates/v/cargo-member.svg)](https://crates.io/crates/cargo-member)
+[![License](https://img.shields.io/crates/l/cargo-member.svg)](https://crates.io/crates/cargo-member)
 
 Cargo subcommand for managing workspace members.
 
 ## Installation
+
+### crates.io
+
+```console
+$ cargo install cargo-member
+```
 
 ### `master`
 
@@ -16,7 +21,35 @@ Cargo subcommand for managing workspace members.
 $ cargo install --git https://github.com/qryxip/cargo-member
 ```
 
+### GitHub Releases
+
+<https://github.com/qryxip/cargo-member/releases>
+
 ## Usage
+
+```console
+$ cargo member --help
+cargo-member 0.1.0
+Ryo Yamashita <qryxip@gmail.com>
+Cargo subcommand for managing workspace members.
+
+USAGE:
+    cargo member <SUBCOMMAND>
+
+OPTIONS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    include    Include a package
+    exclude    Exclude a workspace member
+    focus      Include a package excluding the others
+    new        Create a new workspace member with `cargo new`
+    cp         Copy a workspace member
+    rm         Remove a workspace member
+    mv         Move a workspace member
+    help       Prints this message or the help of the given subcommand(s)
+```
 
 ### `cargo member include`
 

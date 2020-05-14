@@ -29,25 +29,25 @@ pub enum Cargo {
 
 #[derive(StructOpt, Debug)]
 pub enum CargoMember {
-    /// Include a member in the workspace
+    /// Include a package
     Include(CargoMemberInclude),
 
-    /// Exclude a member from the workspace
+    /// Exclude a workspace member
     Exclude(CargoMemberExclude),
 
     /// Include a package excluding the others
     Focus(CargoMemberFocus),
 
-    /// Create a new package with `cargo new`
+    /// Create a new workspace member with `cargo new`
     New(CargoMemberNew),
 
-    /// Copy a member in the workspace
+    /// Copy a workspace member
     Cp(CargoMemberCp),
 
-    /// Remove a member from the workspace
+    /// Remove a workspace member
     Rm(CargoMemberRm),
 
-    /// Move a member in the workspace
+    /// Move a workspace member
     Mv(CargoMemberMv),
 }
 
