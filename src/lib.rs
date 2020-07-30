@@ -636,10 +636,9 @@ impl<W: WriteColor> Cp<W> {
             }
         }
 
-        stderr.status_with_color(
+        stderr.status(
             "Copying",
             format!("`{}` to `{}`", src.display(), dst.display()),
-            termcolor::Color::Green,
         )?;
 
         let src_root = src;
@@ -1043,11 +1042,7 @@ fn modify_members<'a>(
                         .push(add)
                         .map_err(|_| anyhow!("`workspace.{}` must be an string array", field))?;
                 }
-                stderr.status_with_color(
-                    "Adding",
-                    format!("{:?} to `workspace.{}`", add, field),
-                    termcolor::Color::Cyan,
-                )?;
+                stderr.status("Adding", format!("{:?} to `workspace.{}`", add, field))?;
             }
         }
         for rm in *rm {
@@ -1097,6 +1092,10 @@ trait WriteColorExt: WriteColor {
         self.write_all(b"warning:")?;
         self.reset()?;
         writeln!(self, " {}", message)
+    }
+
+    fn status(&mut self, status: impl Display, message: impl Display) -> io::Result<()> {
+        self.status_with_color(status, message, termcolor::Color::Green)
     }
 
     fn status_with_color(
