@@ -636,10 +636,9 @@ impl<W: WriteColor> Cp<W> {
             }
         }
 
-        stderr.status_with_color(
+        stderr.status(
             "Copying",
             format!("`{}` to `{}`", src.display(), dst.display()),
-            termcolor::Color::Green,
         )?;
 
         let src_root = src;
@@ -671,10 +670,11 @@ impl<W: WriteColor> Cp<W> {
             .filter(|d| d.join("Cargo.toml").exists())
             .collect::<Vec<_>>()
         {
-            stderr.info(format_args!(
-                "Found workspace `{}`",
-                dst_workspace_root.display(),
-            ))?;
+            stderr.status_with_color(
+                "Found",
+                format!("workspace at {}", dst_workspace_root.display()),
+                termcolor::Color::Cyan,
+            )?;
 
             modify_members(
                 dst_workspace_root,
@@ -1039,13 +1039,11 @@ fn modify_members<'a>(
             let add = relative_to_root(add)?;
             if array.iter().all(|m| !same_paths(m, add)) {
                 if !dry_run {
-                    array.push(add);
+                    array
+                        .push(add)
+                        .map_err(|_| anyhow!("`workspace.{}` must be an string array", field))?;
                 }
-                stderr.status_with_color(
-                    "Adding",
-                    format!("{:?} to `workspace.{}`", add, field),
-                    termcolor::Color::Cyan,
-                )?;
+                stderr.status("Adding", format!("{:?} to `workspace.{}`", add, field))?;
             }
         }
         for rm in *rm {
@@ -1073,18 +1071,6 @@ fn modify_members<'a>(
 }
 
 trait WriteColorExt: WriteColor {
-    fn info(&mut self, message: impl Display) -> io::Result<()> {
-        self.set_color(
-            ColorSpec::new()
-                .set_fg(Some(termcolor::Color::Cyan))
-                .set_bold(true)
-                .set_reset(false),
-        )?;
-        self.write_all(b"info:")?;
-        self.reset()?;
-        writeln!(self, " {}", message)
-    }
-
     fn warn(&mut self, message: impl Display) -> io::Result<()> {
         self.set_color(
             ColorSpec::new()
@@ -1095,6 +1081,10 @@ trait WriteColorExt: WriteColor {
         self.write_all(b"warning:")?;
         self.reset()?;
         writeln!(self, " {}", message)
+    }
+
+    fn status(&mut self, status: impl Display, message: impl Display) -> io::Result<()> {
+        self.status_with_color(status, message, termcolor::Color::Green)
     }
 
     fn status_with_color(

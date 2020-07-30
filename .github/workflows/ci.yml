@@ -228,25 +228,3 @@ jobs:
           files: ./assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  publish:
-    name: Publish
-    runs-on: ubuntu-18.04
-    needs: [release]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Setup `stable-x86_64-unknown-linux-gnu`
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable-x86_64-unknown-linux-gnu
-          default: true
-          profile: minimal
-
-      - name: '`cargo publish --token "$CRATES_IO_TOKEN" -v`'
-        uses: actions-rs/cargo@v1
-        with:
-          command: publish
-          args: --token ${{ secrets.CRATES_IO_TOKEN }} -v
