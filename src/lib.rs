@@ -670,10 +670,11 @@ impl<W: WriteColor> Cp<W> {
             .filter(|d| d.join("Cargo.toml").exists())
             .collect::<Vec<_>>()
         {
-            stderr.info(format_args!(
-                "Found workspace `{}`",
-                dst_workspace_root.display(),
-            ))?;
+            stderr.status_with_color(
+                "Found",
+                format!("workspace at {}", dst_workspace_root.display()),
+                termcolor::Color::Cyan,
+            )?;
 
             modify_members(
                 dst_workspace_root,
@@ -1070,18 +1071,6 @@ fn modify_members<'a>(
 }
 
 trait WriteColorExt: WriteColor {
-    fn info(&mut self, message: impl Display) -> io::Result<()> {
-        self.set_color(
-            ColorSpec::new()
-                .set_fg(Some(termcolor::Color::Cyan))
-                .set_bold(true)
-                .set_reset(false),
-        )?;
-        self.write_all(b"info:")?;
-        self.reset()?;
-        writeln!(self, " {}", message)
-    }
-
     fn warn(&mut self, message: impl Display) -> io::Result<()> {
         self.set_color(
             ColorSpec::new()
