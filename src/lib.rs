@@ -1039,7 +1039,9 @@ fn modify_members<'a>(
             let add = relative_to_root(add)?;
             if array.iter().all(|m| !same_paths(m, add)) {
                 if !dry_run {
-                    array.push(add);
+                    array
+                        .push(add)
+                        .map_err(|_| anyhow!("`workspace.{}` must be an string array", field))?;
                 }
                 stderr.status_with_color(
                     "Adding",
