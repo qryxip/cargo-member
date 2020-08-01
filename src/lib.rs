@@ -1080,7 +1080,8 @@ trait WriteColorExt: WriteColor {
         )?;
         self.write_all(b"warning:")?;
         self.reset()?;
-        writeln!(self, " {}", message)
+        writeln!(self, " {}", message)?;
+        self.flush()
     }
 
     fn status(&mut self, status: impl Display, message: impl Display) -> io::Result<()> {
@@ -1101,7 +1102,8 @@ trait WriteColorExt: WriteColor {
         )?;
         write!(self, "{:>12}", status)?;
         self.reset()?;
-        writeln!(self, " {}", message)
+        writeln!(self, " {}", message)?;
+        self.flush()
     }
 }
 
