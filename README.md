@@ -29,7 +29,7 @@ $ cargo install --git https://github.com/qryxip/cargo-member
 
 ```console
 $ cargo member --help
-cargo-member 0.1.1
+cargo-member 0.1.2
 Ryo Yamashita <qryxip@gmail.com>
 Cargo subcommand for managing workspace members.
 
