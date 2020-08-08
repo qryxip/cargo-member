@@ -1,4 +1,4 @@
-use crate::{Cp, Exclude, Focus, Include, Mv, New, Rm};
+use crate::{Cp, Deactivate, Exclude, Focus, Include, Mv, New, Rm};
 use anyhow::{bail, Context as _};
 use cargo_metadata::Metadata;
 use easy_ext::ext;
@@ -29,11 +29,14 @@ pub enum Cargo {
 
 #[derive(StructOpt, Debug)]
 pub enum CargoMember {
-    /// Include a package
+    /// Include packages
     Include(CargoMemberInclude),
 
-    /// Exclude a workspace member
+    /// Exclude workspace members
     Exclude(CargoMemberExclude),
+
+    /// Deactivate packages
+    Deactivate(CargoMemberDeactivate),
 
     /// Include a package excluding the others
     Focus(CargoMemberFocus),
@@ -56,6 +59,7 @@ impl CargoMember {
         match *self {
             Self::Include(CargoMemberInclude { color, .. })
             | Self::Exclude(CargoMemberExclude { color, .. })
+            | Self::Deactivate(CargoMemberDeactivate { color, .. })
             | Self::Focus(CargoMemberFocus { color, .. })
             | Self::New(CargoMemberNew { color, .. })
             | Self::Cp(CargoMemberCp { color, .. })
@@ -98,6 +102,37 @@ pub struct CargoMemberInclude {
 
 #[derive(StructOpt, Debug)]
 pub struct CargoMemberExclude {
+    /// [cargo] Package(s) to exclude
+    #[structopt(short, long, value_name("SPEC"), min_values(1), number_of_values(1))]
+    pub package: Vec<String>,
+
+    /// [cargo] Path to Cargo.toml
+    #[structopt(long, value_name("PATH"))]
+    pub manifest_path: Option<PathBuf>,
+
+    /// [cargo] Coloring
+    #[structopt(
+        long,
+        value_name("WHEN"),
+        possible_values(self::ColorChoice::VARIANTS),
+        default_value("auto")
+    )]
+    pub color: self::ColorChoice,
+
+    /// [cargo] Run without accessing the network
+    #[structopt(long)]
+    pub offline: bool,
+
+    /// Dry run. Also enables `--frozen` and `--locked`
+    #[structopt(long)]
+    pub dry_run: bool,
+
+    /// Paths to exclude
+    pub paths: Vec<PathBuf>,
+}
+
+#[derive(StructOpt, Debug)]
+pub struct CargoMemberDeactivate {
     /// [cargo] Package(s) to exclude
     #[structopt(short, long, value_name("SPEC"), min_values(1), number_of_values(1))]
     pub package: Vec<String>,
@@ -385,6 +420,7 @@ pub fn run(opt: CargoMember, ctx: Context<impl WriteColor>) -> anyhow::Result<()
     match opt {
         CargoMember::Include(opt) => include(opt, ctx),
         CargoMember::Exclude(opt) => exclude(opt, ctx),
+        CargoMember::Deactivate(opt) => deactivate(opt, ctx),
         CargoMember::Focus(opt) => focus(opt, ctx),
         CargoMember::New(opt) => new(opt, ctx),
         CargoMember::Cp(opt) => cp(opt, ctx),
@@ -433,6 +469,28 @@ fn exclude(opt: CargoMemberExclude, ctx: Context<impl WriteColor>) -> anyhow::Re
     let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
 
     Exclude::from_metadata(&metadata, paths, package)
+        .dry_run(dry_run)
+        .stderr(stderr)
+        .exec()
+}
+
+fn deactivate(opt: CargoMemberDeactivate, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
+    let CargoMemberDeactivate {
+        package,
+        manifest_path,
+        offline,
+        dry_run,
+        paths,
+        ..
+    } = opt;
+
+    let Context { cwd, stderr, .. } = ctx;
+
+    let metadata =
+        crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
+    let paths = paths.into_iter().map(|p| cwd.join(p.trim_leading_dots()));
+
+    Deactivate::from_metadata(&metadata, paths, package)
         .dry_run(dry_run)
         .stderr(stderr)
         .exec()
