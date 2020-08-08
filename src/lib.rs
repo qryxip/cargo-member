@@ -240,6 +240,113 @@ impl<W: WriteColor> Exclude<W> {
 }
 
 #[derive(Debug)]
+pub struct Deactivate<W> {
+    workspace_root: anyhow::Result<PathBuf>,
+    paths: anyhow::Result<Vec<PathBuf>>,
+    dry_run: bool,
+    stderr: W,
+}
+
+impl Deactivate<NoColor<Sink>> {
+    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+        workspace_root: &Path,
+        paths: Ps,
+    ) -> Self {
+        Self {
+            workspace_root: ensure_absolute(workspace_root),
+            paths: paths.into_iter().map(ensure_absolute).collect(),
+            dry_run: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+
+    pub fn from_metadata<
+        Ps: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+        Ss: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    >(
+        metadata: &Metadata,
+        paths: Ps,
+        specs: Ss,
+    ) -> Self {
+        Self {
+            workspace_root: Ok(metadata.workspace_root.clone()),
+            paths: paths
+                .into_iter()
+                .map(ensure_absolute)
+                .chain(specs.into_iter().map(|spec| {
+                    let member = metadata.query_for_member(Some(spec.as_ref()))?;
+                    Ok(member
+                        .manifest_path
+                        .parent()
+                        .expect(r#"`manifest_path` should end with "Cargo.toml""#)
+                        .to_owned())
+                }))
+                .collect(),
+            dry_run: false,
+            stderr: NoColor::new(io::sink()),
+        }
+    }
+}
+
+impl<W: WriteColor> Deactivate<W> {
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Self { dry_run, ..self }
+    }
+
+    pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Deactivate<W2> {
+        Deactivate {
+            workspace_root: self.workspace_root,
+            paths: self.paths,
+            dry_run: self.dry_run,
+            stderr,
+        }
+    }
+
+    pub fn exec(self) -> anyhow::Result<()> {
+        let Self {
+            mut stderr,
+            workspace_root,
+            paths,
+            dry_run,
+        } = self;
+
+        let (workspace_root, paths) = (workspace_root?, paths?);
+
+        let modified = paths.iter().try_fold(false, |acc, path| {
+            modify_members(
+                &workspace_root,
+                &[],
+                &[],
+                &[path],
+                &[path],
+                dry_run,
+                &mut stderr,
+            )
+            .map(|p| acc | p)
+        })?;
+
+        if !modified {
+            stderr.warn("`workspace` unchanged")?;
+        }
+
+        if dry_run {
+            stderr.warn("not modifying the manifest due to dry run")?;
+        } else {
+            cargo_metadata_unless_empty(
+                &workspace_root.join("Cargo.toml"),
+                false,
+                false,
+                false,
+                &workspace_root,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct Focus<W> {
     workspace_root: anyhow::Result<PathBuf>,
     path: anyhow::Result<PathBuf>,

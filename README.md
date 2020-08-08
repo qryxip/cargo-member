@@ -100,6 +100,31 @@ members = []
 exclude = ["a"]
 ```
 
+### `cargo member deactivate`
+
+```console
+$ tree "$PWD"
+/home/ryo/src/local/workspace
+├── a
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
+├── Cargo.lock
+└── Cargo.toml
+
+2 directories, 4 files
+$ cat ./Cargo.toml
+[workspace]
+members = ["a"]
+exclude = []
+$ cargo member deactivate ./a # or `-p a`
+    Removing "a" from `workspace.members`
+$ cat ./Cargo.toml
+[workspace]
+members = []
+exclude = []
+```
+
 ### `cargo member focus`
 
 ```console
