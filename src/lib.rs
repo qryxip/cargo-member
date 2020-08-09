@@ -116,6 +116,11 @@ impl<W: WriteColor> Include<W> {
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
         } else {
+            stderr.status(
+                "Updating",
+                possibly_empty_workspace_root.join("Cargo.lock").display(),
+            )?;
+
             let result = cargo_metadata(
                 Some(&possibly_empty_workspace_root.join("Cargo.toml")),
                 false,
@@ -227,6 +232,8 @@ impl<W: WriteColor> Exclude<W> {
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
         } else {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
             cargo_metadata_unless_empty(
                 &workspace_root.join("Cargo.toml"),
                 false,
@@ -334,6 +341,8 @@ impl<W: WriteColor> Deactivate<W> {
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
         } else {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
             cargo_metadata_unless_empty(
                 &workspace_root.join("Cargo.toml"),
                 false,
@@ -426,6 +435,8 @@ impl<W: WriteColor> Focus<W> {
         if dry_run {
             stderr.warn("not modifying `workspace` due to dry run")?;
         } else {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
             cargo_metadata(
                 Some(&workspace_root.join("Cargo.toml")),
                 false,
@@ -589,6 +600,11 @@ impl<W: WriteColor> New<W> {
                     output.status,
                 );
             }
+
+            stderr.status(
+                "Updating",
+                possibly_empty_workspace_root.join("Cargo.lock").display(),
+            )?;
 
             cargo_metadata(None, false, false, offline, &possibly_empty_workspace_root)?;
         }
@@ -921,6 +937,8 @@ impl<W: WriteColor> Rm<W> {
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
         } else {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
             let result = cargo_metadata_unless_empty(
                 &workspace_root.join("Cargo.toml"),
                 false,
