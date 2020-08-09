@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## Changed
+
+- Now `cargo member focus` `deactivate`s existing packages.
+
 ## Added
 
 - Added `deactivate` command.

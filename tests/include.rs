@@ -28,7 +28,10 @@ fn normal() -> anyhow::Result<()> {
         .exec()?;
 
     assert_manifest(&tempdir.path().join("Cargo.toml"), EXPECTED_MANIFEST)?;
-    assert_stderr(&stderr, EXPECTED_STDERR)?;
+    assert_stderr(
+        &stderr,
+        &EXPECTED_STDERR.replace("{}", &tempdir.path().join("Cargo.lock").to_string_lossy()),
+    )?;
     cargo_metadata(&tempdir.path().join("Cargo.toml"), &["--locked"])?;
     return Ok(());
 
@@ -44,6 +47,7 @@ exclude = []
 
     static EXPECTED_STDERR: &str = r#"      Adding "b" to `workspace.members`
     Removing "b" from `workspace.exclude`
+    Updating {}
 "#;
 }
 

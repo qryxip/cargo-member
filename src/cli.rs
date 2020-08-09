@@ -29,16 +29,16 @@ pub enum Cargo {
 
 #[derive(StructOpt, Debug)]
 pub enum CargoMember {
-    /// Include packages
+    /// Add a package to `workspace.members`
     Include(CargoMemberInclude),
 
-    /// Exclude workspace members
+    /// Move a package from `package.members` to `workspace.exclude`
     Exclude(CargoMemberExclude),
 
-    /// Deactivate packages
+    /// Remove a package from both of `package.{members, exclude}`
     Deactivate(CargoMemberDeactivate),
 
-    /// Include a package excluding the others
+    /// `include` a package and `deactivate`/`exclude` the others
     Focus(CargoMemberFocus),
 
     /// Create a new workspace member with `cargo new`
@@ -164,6 +164,10 @@ pub struct CargoMemberDeactivate {
 
 #[derive(StructOpt, Debug)]
 pub struct CargoMemberFocus {
+    /// Add existing packages to `workspace.exclude`
+    #[structopt(long)]
+    pub exclude: bool,
+
     /// Dry run. Also enables `--frozen` and `--locked`
     #[structopt(long)]
     pub dry_run: bool,
@@ -498,6 +502,7 @@ fn deactivate(opt: CargoMemberDeactivate, ctx: Context<impl WriteColor>) -> anyh
 
 fn focus(opt: CargoMemberFocus, ctx: Context<impl WriteColor>) -> anyhow::Result<()> {
     let CargoMemberFocus {
+        exclude,
         dry_run,
         manifest_path,
         offline,
@@ -514,6 +519,7 @@ fn focus(opt: CargoMemberFocus, ctx: Context<impl WriteColor>) -> anyhow::Result
     Focus::new(&workspace_root, &path)
         .dry_run(dry_run)
         .offline(offline)
+        .exclude(exclude)
         .stderr(stderr)
         .exec()
 }
