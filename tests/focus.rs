@@ -18,7 +18,7 @@ fn focus() -> anyhow::Result<()> {
     fs::write(tempdir.path().join("Cargo.toml"), ORIGINAL)?;
     cargo_new(&tempdir.path().join("a"))?;
     cargo_new(&tempdir.path().join("b"))?;
-    cargo_metadata(&tempdir.path().join("Cargo.toml"), &[]).unwrap_err();
+    cargo_metadata(&tempdir.path().join("Cargo.toml"), &[])?;
 
     let mut stderr = vec![];
 
@@ -29,22 +29,25 @@ fn focus() -> anyhow::Result<()> {
         .exec()?;
 
     assert_manifest(&tempdir.path().join("Cargo.toml"), EXPECTED_MANIFEST)?;
-    assert_stderr(&stderr, EXPECTED_STDERR)?;
+    assert_stderr(
+        &stderr,
+        &EXPECTED_STDERR.replace("{}", &tempdir.path().join("Cargo.lock").to_string_lossy()),
+    )?;
     cargo_metadata(&tempdir.path().join("Cargo.toml"), &["--locked"])?;
     return Ok(());
 
     static ORIGINAL: &str = r#"[workspace]
-members = []
+members = ["a", "b"]
 exclude = []
 "#;
 
     static EXPECTED_MANIFEST: &str = r#"[workspace]
 members = ["a"]
-exclude = ["b"]
+exclude = []
 "#;
 
-    static EXPECTED_STDERR: &str = r#"      Adding "a" to `workspace.members`
-      Adding "b" to `workspace.exclude`
+    static EXPECTED_STDERR: &str = r#"    Removing "b" from `workspace.members`
+    Updating {}
 "#;
 }
 

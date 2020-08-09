@@ -115,18 +115,21 @@ impl<W: WriteColor> Include<W> {
 
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
-        } else {
-            let result = cargo_metadata(
+        } else if paths.iter().all(|p| p.exists()) {
+            stderr.status(
+                "Updating",
+                possibly_empty_workspace_root.join("Cargo.lock").display(),
+            )?;
+
+            cargo_metadata(
                 Some(&possibly_empty_workspace_root.join("Cargo.toml")),
                 false,
                 false,
                 offline,
                 &possibly_empty_workspace_root,
-            );
-
-            if !force {
-                result?;
-            }
+            )?;
+        } else if !force {
+            bail!("some packages do not exist");
         }
         Ok(())
     }
@@ -226,9 +229,11 @@ impl<W: WriteColor> Exclude<W> {
 
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
-        } else {
-            cargo_metadata_unless_empty(
-                &workspace_root.join("Cargo.toml"),
+        } else if !is_empty_workspace(&workspace_root.join("Cargo.toml"))? {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
+            cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
                 false,
                 false,
                 false,
@@ -333,9 +338,11 @@ impl<W: WriteColor> Deactivate<W> {
 
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
-        } else {
-            cargo_metadata_unless_empty(
-                &workspace_root.join("Cargo.toml"),
+        } else if !is_empty_workspace(&workspace_root.join("Cargo.toml"))? {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
+            cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
                 false,
                 false,
                 false,
@@ -352,6 +359,7 @@ pub struct Focus<W> {
     path: anyhow::Result<PathBuf>,
     dry_run: bool,
     offline: bool,
+    exclude: bool,
     stderr: W,
 }
 
@@ -362,6 +370,7 @@ impl Focus<NoColor<Sink>> {
             path: ensure_absolute(path),
             dry_run: false,
             offline: false,
+            exclude: false,
             stderr: NoColor::new(io::sink()),
         }
     }
@@ -376,12 +385,17 @@ impl<W: WriteColor> Focus<W> {
         Self { offline, ..self }
     }
 
+    pub fn exclude(self, exclude: bool) -> Self {
+        Self { exclude, ..self }
+    }
+
     pub fn stderr<W2: WriteColor>(self, stderr: W2) -> Focus<W2> {
         Focus {
             workspace_root: self.workspace_root,
             path: self.path,
             dry_run: self.dry_run,
             offline: self.offline,
+            exclude: self.exclude,
             stderr,
         }
     }
@@ -392,32 +406,33 @@ impl<W: WriteColor> Focus<W> {
             path,
             dry_run,
             offline,
+            exclude,
             mut stderr,
         } = self;
 
         let (workspace_root, path) = (workspace_root?, path?);
 
-        let mut exclude = vec![];
+        let mut targets = vec![];
         for entry in Walk::new(&workspace_root) {
             match entry {
                 Ok(entry) => {
                     if entry.path().ends_with("Cargo.toml") {
                         let dir = entry.path().parent().expect("should not empty");
                         if ![&*workspace_root, &*path].contains(&dir) {
-                            exclude.push(dir.to_owned());
+                            targets.push(dir.to_owned());
                         }
                     }
                 }
                 Err(err) => stderr.warn(err)?,
             }
         }
-        let exclude = exclude.iter().map(Deref::deref).collect::<Vec<_>>();
+        let targets = targets.iter().map(Deref::deref).collect::<Vec<_>>();
 
         modify_members(
             &workspace_root,
             &[&path],
-            &exclude,
-            &exclude,
+            if exclude { &targets } else { &[] },
+            &targets,
             &[&path],
             dry_run,
             &mut stderr,
@@ -426,6 +441,8 @@ impl<W: WriteColor> Focus<W> {
         if dry_run {
             stderr.warn("not modifying `workspace` due to dry run")?;
         } else {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
             cargo_metadata(
                 Some(&workspace_root.join("Cargo.toml")),
                 false,
@@ -589,6 +606,11 @@ impl<W: WriteColor> New<W> {
                     output.status,
                 );
             }
+
+            stderr.status(
+                "Updating",
+                possibly_empty_workspace_root.join("Cargo.lock").display(),
+            )?;
 
             cargo_metadata(None, false, false, offline, &possibly_empty_workspace_root)?;
         }
@@ -920,18 +942,16 @@ impl<W: WriteColor> Rm<W> {
 
         if dry_run {
             stderr.warn("not modifying the manifest due to dry run")?;
-        } else {
-            let result = cargo_metadata_unless_empty(
-                &workspace_root.join("Cargo.toml"),
+        } else if !is_empty_workspace(&workspace_root.join("Cargo.toml"))? {
+            stderr.status("Updating", workspace_root.join("Cargo.lock").display())?;
+
+            cargo_metadata(
+                Some(&workspace_root.join("Cargo.toml")),
                 false,
                 false,
                 false,
                 &workspace_root,
-            );
-
-            if !force {
-                result?;
-            }
+            )?;
         }
         Ok(())
     }
@@ -1028,18 +1048,11 @@ fn ensure_absolute(path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     Ok(path.to_owned())
 }
 
-fn cargo_metadata_unless_empty(
-    manifest_path: &Path,
-    frozen: bool,
-    locked: bool,
-    offline: bool,
-    cwd: &Path,
-) -> anyhow::Result<()> {
-    let CargoToml { workspace, package } = crate::fs::read_toml(manifest_path)?;
-    if !workspace.members.is_empty() || package.is_some() {
-        cargo_metadata(Some(manifest_path), frozen, locked, offline, cwd)?;
-    }
-    return Ok(());
+fn is_empty_workspace(manifest_path: &Path) -> anyhow::Result<bool> {
+    return {
+        let CargoToml { workspace, package } = crate::fs::read_toml(manifest_path)?;
+        Ok(!workspace.members.is_empty() || package.is_some())
+    };
 
     #[derive(Deserialize)]
     struct CargoToml {

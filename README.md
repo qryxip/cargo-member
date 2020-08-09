@@ -41,14 +41,15 @@ OPTIONS:
     -V, --version    Prints version information
 
 SUBCOMMANDS:
-    include    Include a package
-    exclude    Exclude a workspace member
-    focus      Include a package excluding the others
-    new        Create a new workspace member with `cargo new`
-    cp         Copy a workspace member
-    rm         Remove a workspace member
-    mv         Move a workspace member
-    help       Prints this message or the help of the given subcommand(s)
+    include       Add a package to `workspace.members`
+    exclude       Move a package from `package.members` to `workspace.exclude`
+    deactivate    Remove a package from both of `package.{members, exclude}`
+    focus         `include` a package and `deactivate`/`exclude` the others
+    new           Create a new workspace member with `cargo new`
+    cp            Copy a workspace member
+    rm            Remove a workspace member
+    mv            Move a workspace member
+    help          Prints this message or the help of the given subcommand(s)
 ```
 
 ### `cargo member include`
@@ -60,19 +61,30 @@ $ tree "$PWD"
 │   ├── Cargo.toml
 │   └── src
 │       └── main.rs
+├── b
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
+├── Cargo.lock
 └── Cargo.toml
 
-2 directories, 3 files
-$ cat ./Cargo.toml
-[workspace]
-$ cargo member include ./a
-      Adding "a" to `workspace.members`
+4 directories, 6 files
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
 exclude = []
-$ cargo metadata --format-version 1 | jq -r '.packages[] | .name'
-a
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+$ cargo member include ./b
+      Adding "b" to `workspace.members`
+    Updating /home/ryo/src/local/workspace/Cargo.lock
+$ cat ./Cargo.toml
+[workspace]
+members = ["a", "b"]
+exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+b 0.1.0 (path+file:///home/ryo/src/local/workspace/b)
 ```
 
 ### `cargo member exclude`
@@ -84,20 +96,31 @@ $ tree "$PWD"
 │   ├── Cargo.toml
 │   └── src
 │       └── main.rs
+├── b
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
 ├── Cargo.lock
 └── Cargo.toml
 
-2 directories, 4 files
+4 directories, 6 files
+$ cat ./Cargo.toml
+[workspace]
+members = ["a", "b"]
+exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+b 0.1.0 (path+file:///home/ryo/src/local/workspace/b)
+$ cargo member exclude ./b # or `-p b`
+    Removing "b" from `workspace.members`
+      Adding "b" to `workspace.exclude`
+    Updating /home/ryo/src/local/workspace/Cargo.lock
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
-$ cargo member exclude ./a # or `-p a`
-    Removing "a" from `workspace.members`
-      Adding "a" to `workspace.exclude`
-$ cat ./Cargo.toml
-[workspace]
-members = []
-exclude = ["a"]
+exclude = ["b"]
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
 ```
 
 ### `cargo member deactivate`
@@ -106,23 +129,45 @@ exclude = ["a"]
 $ tree "$PWD"
 /home/ryo/src/local/workspace
 ├── a
-│   ├── Cargo.toml
-│   └── src
-│       └── main.rs
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
+├── b
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
+├── c
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
 ├── Cargo.lock
 └── Cargo.toml
 
-2 directories, 4 files
+6 directories, 8 files
+$ cat ./Cargo.toml
+[workspace]
+members = ["a", "b"]
+exclude = ["c"]
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+b 0.1.0 (path+file:///home/ryo/src/local/workspace/b)
+$ cargo member deactivate ./b ./c
+    Removing "b" from `workspace.members`
+    Removing "c" from `workspace.exclude`
+    Updating /home/ryo/src/local/workspace/Cargo.lock
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
 exclude = []
-$ cargo member deactivate ./a # or `-p a`
-    Removing "a" from `workspace.members`
-$ cat ./Cargo.toml
-[workspace]
-members = []
-exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+$ cargo metadata --format-version 1 --manifest-path ./b/Cargo.toml
+error: current package believes it's in a workspace when it's not:
+current:   /home/ryo/src/local/workspace/b/Cargo.toml
+workspace: /home/ryo/src/local/workspace/Cargo.toml
+
+this may be fixable by adding `b` to the `workspace.members` array of the manifest located at: /home/ryo/src/local/workspace/Cargo.toml
+Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.
 ```
 
 ### `cargo member focus`
@@ -150,28 +195,34 @@ $ cat ./Cargo.toml
 [workspace]
 members = ["a", "b", "c"]
 exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+b 0.1.0 (path+file:///home/ryo/src/local/workspace/b)
+c 0.1.0 (path+file:///home/ryo/src/local/workspace/c)
 $ cargo member focus ./a # or `-p a`
     Removing "b" from `workspace.members`
     Removing "c" from `workspace.members`
-      Adding "b" to `workspace.exclude`
-      Adding "c" to `workspace.exclude`
+    Updating /home/ryo/src/local/workspace/Cargo.lock
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
-exclude = ["b", "c"]
+exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
 ```
 
 ### `cargo member new`
 
 ```console
-❯ tree "$PWD"
+$ tree "$PWD"
 /home/ryo/src/local/workspace
 
 0 directories, 0 files
 $ echo '[workspace]' > ./Cargo.toml
 $ cargo member new a
-     Created binary (application) `/home/ryo/src/local/workspace/a` package
       Adding "a" to `workspace.members`
+     Created binary (application) `/home/ryo/src/local/workspace/a` package
+    Updating /home/ryo/src/local/workspace/Cargo.lock
 $ tree "$PWD"
 /home/ryo/src/local/workspace
 ├── a
@@ -186,8 +237,8 @@ $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
 exclude = []
-$ cargo metadata --format-version 1 | jq -r '.packages[] | .name'
-a
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
 ```
 
 ### `cargo member cp`
@@ -207,9 +258,11 @@ $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
 exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
 $ cargo member cp a ./b
      Copying `/home/ryo/src/local/workspace/a` to `/home/ryo/src/local/workspace/b`
-info: Found workspace `/home/ryo/src/local/workspace`
+       Found workspace at /home/ryo/src/local/workspace
       Adding "b" to `workspace.members`
 $ tree "$PWD"
 /home/ryo/src/local/workspace
@@ -229,9 +282,9 @@ $ cat ./Cargo.toml
 [workspace]
 members = ["a", "b"]
 exclude = []
-$ cargo metadata --format-version 1 | jq -r '.packages | map(.name) | sort[]'
-a
-b
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+b 0.1.0 (path+file:///home/ryo/src/local/workspace/b)
 ```
 
 ### `cargo member rm`
@@ -243,27 +296,31 @@ $ tree "$PWD"
 │   ├── Cargo.toml
 │   └── src
 │       └── main.rs
+├── b
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
 ├── Cargo.lock
 └── Cargo.toml
 
-2 directories, 4 files
+4 directories, 6 files
+$ cat ./Cargo.toml
+[workspace]
+members = ["a", "b"]
+exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
+b 0.1.0 (path+file:///home/ryo/src/local/workspace/b)
+$ cargo member rm ./b # or `-p b`
+    Removing directory `/home/ryo/src/local/workspace/b`
+    Removing "b" from `workspace.members`
+    Updating /home/ryo/src/local/workspace/Cargo.lock
 $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
 exclude = []
-$ cargo member rm ./a # or `-p a`
-    Removing directory `/home/ryo/src/local/workspace/a`
-    Removing "a" from `workspace.members`
-$ tree "$PWD"
-/home/ryo/src/local/workspace
-├── Cargo.lock
-└── Cargo.toml
-
-0 directories, 2 files
-$ cat ./Cargo.toml
-[workspace]
-members = []
-exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
 ```
 
 ### `cargo member mv`
@@ -283,12 +340,15 @@ $ cat ./Cargo.toml
 [workspace]
 members = ["a"]
 exclude = []
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+a 0.1.0 (path+file:///home/ryo/src/local/workspace/a)
 $ cargo member mv a ./b
      Copying `/home/ryo/src/local/workspace/a` to `/home/ryo/src/local/workspace/b`
-info: Found workspace `/home/ryo/src/local/workspace`
+       Found workspace at /home/ryo/src/local/workspace
       Adding "b" to `workspace.members`
     Removing directory `/home/ryo/src/local/workspace/a`
     Removing "a" from `workspace.members`
+    Updating /home/ryo/src/local/workspace/Cargo.lock
 $ tree "$PWD"
 /home/ryo/src/local/workspace
 ├── b
@@ -303,8 +363,8 @@ $ cat ./Cargo.toml
 [workspace]
 members = [ "b"]
 exclude = []
-$ cargo metadata --format-version 1 | jq -r '.packages[] | .name'
-b
+$ cargo metadata --format-version 1 | jq -r '.packages | map(.id) | sort[]'
+b 0.1.0 (path+file:///home/ryo/src/local/workspace/b)
 ```
 
 ## License
