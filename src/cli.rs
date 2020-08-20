@@ -30,27 +30,35 @@ pub enum Cargo {
 #[derive(StructOpt, Debug)]
 pub enum CargoMember {
     /// Add a package to `workspace.members`
+    #[structopt(author, visible_alias("i"))]
     Include(CargoMemberInclude),
 
     /// Move a package from `package.members` to `workspace.exclude`
+    #[structopt(author, visible_alias("e"))]
     Exclude(CargoMemberExclude),
 
     /// Remove a package from both of `package.{members, exclude}`
+    #[structopt(author, visible_alias("d"))]
     Deactivate(CargoMemberDeactivate),
 
     /// `include` a package and `deactivate`/`exclude` the others
+    #[structopt(author, visible_alias("f"))]
     Focus(CargoMemberFocus),
 
     /// Create a new workspace member with `cargo new`
+    #[structopt(author, visible_alias("n"))]
     New(CargoMemberNew),
 
     /// Copy a workspace member
+    #[structopt(author, visible_alias("c"))]
     Cp(CargoMemberCp),
 
     /// Remove a workspace member
+    #[structopt(author, visible_alias("r"))]
     Rm(CargoMemberRm),
 
     /// Move a workspace member
+    #[structopt(author, visible_alias("m"))]
     Mv(CargoMemberMv),
 }
 
