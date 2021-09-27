@@ -45,7 +45,9 @@ exclude = []
 "#;
 
     static EXPECTED_MANIFEST: &str = r#"[workspace]
-members = ["a"]
+members = [
+    "a",
+]
 exclude = []
 "#;
 

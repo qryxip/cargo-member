@@ -11,25 +11,25 @@ keywords = ["cargo", "cargo-subcommand"]
 categories = ["development-tools", "development-tools::cargo-plugins"]
 
 [dependencies]
-anyhow = "1.0.32"
+anyhow = "1.0.44"
 atty = "0.2.14"
-cargo_metadata = "0.11.1"
-duct = "0.13.4"
-easy-ext = "0.2.2"
-env_logger = "0.7.1"
-ignore = "0.4.16"
-itertools = "0.9.0"
-log = "0.4.11"
-remove_dir_all = "0.5.3"
-serde = { version = "1.0.114", features = ["derive"] }
-serde_json = "1.0.57"
+cargo_metadata = "0.14.0"
+duct = "0.13.5"
+easy-ext = "1.0.0"
+env_logger = "0.9.0"
+ignore = "0.4.18"
+itertools = "0.10.1"
+log = "0.4.14"
+remove_dir_all = "0.7.0"
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.68"
 shell-escape = "0.1.5"
-structopt = "0.3.15"
-strum = { version = "0.18.0", features = ["derive"] }
-termcolor = "1.1.0"
-toml = "0.5.6"
-toml_edit = "0.2.0"
-url = "2.1.1"
+structopt = "0.3.23"
+strum = { version = "0.21.0", features = ["derive"] }
+termcolor = "1.1.2"
+toml = "0.5.8"
+toml_edit = "0.3.1"
+url = "2.2.2"
 
 [dev-dependencies]
 difference = "2.0.0"
