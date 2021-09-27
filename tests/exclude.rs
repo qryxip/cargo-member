@@ -40,7 +40,10 @@ exclude = []
 
     static EXPECTED_MANIFEST: &str = r#"[workspace]
 members = ["a"]
-exclude = ["b", "c"]
+exclude = [
+    "b",
+    "c",
+]
 "#;
 
     static EXPECTED_STDERR: &str = r#"    Removing "b" from `workspace.members`

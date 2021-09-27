@@ -1,16 +1,5 @@
 #![warn(rust_2018_idioms)]
 
-#[doc(hidden)]
-pub mod cli;
-mod fs;
-
-use anyhow::{anyhow, bail, ensure, Context as _};
-use cargo_metadata::{Metadata, MetadataCommand, Package, Resolve};
-use easy_ext::ext;
-use ignore::{Walk, WalkBuilder};
-use itertools::Itertools as _;
-use log::debug;
-use serde::Deserialize;
 use std::{
     env,
     ffi::{OsStr, OsString},
@@ -21,8 +10,21 @@ use std::{
     process::{Command, Stdio},
     slice, str, vec,
 };
+
+use anyhow::{anyhow, bail, Context as _, ensure};
+use cargo_metadata::{Metadata, MetadataCommand, Package, Resolve};
+use easy_ext::ext;
+use ignore::{Walk, WalkBuilder};
+use itertools::Itertools as _;
+use log::debug;
+use serde::Deserialize;
 use termcolor::{ColorSpec, NoColor, WriteColor};
+use toml_edit::Value;
 use url::Url;
+
+#[doc(hidden)]
+pub mod cli;
+mod fs;
 
 #[derive(Debug)]
 pub struct Include<W> {
@@ -35,7 +37,7 @@ pub struct Include<W> {
 }
 
 impl Include<NoColor<Sink>> {
-    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+    pub fn new<Ps: IntoIterator<Item=P>, P: AsRef<Path>>(
         possibly_empty_workspace_root: &Path,
         paths: Ps,
     ) -> Self {
@@ -106,7 +108,7 @@ impl<W: WriteColor> Include<W> {
                 dry_run,
                 &mut stderr,
             )
-            .map(|p| acc | p)
+                .map(|p| acc | p)
         })?;
 
         if !modified {
@@ -144,7 +146,7 @@ pub struct Exclude<W> {
 }
 
 impl Exclude<NoColor<Sink>> {
-    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+    pub fn new<Ps: IntoIterator<Item=P>, P: AsRef<Path>>(
         workspace_root: &Path,
         paths: Ps,
     ) -> Self {
@@ -157,9 +159,9 @@ impl Exclude<NoColor<Sink>> {
     }
 
     pub fn from_metadata<
-        Ps: IntoIterator<Item = P>,
+        Ps: IntoIterator<Item=P>,
         P: AsRef<Path>,
-        Ss: IntoIterator<Item = S>,
+        Ss: IntoIterator<Item=S>,
         S: AsRef<str>,
     >(
         metadata: &Metadata,
@@ -167,7 +169,7 @@ impl Exclude<NoColor<Sink>> {
         specs: Ss,
     ) -> Self {
         Self {
-            workspace_root: Ok(metadata.workspace_root.clone()),
+            workspace_root: Ok(metadata.workspace_root.clone().into_std_path_buf()),
             paths: paths
                 .into_iter()
                 .map(ensure_absolute)
@@ -175,6 +177,7 @@ impl Exclude<NoColor<Sink>> {
                     let member = metadata.query_for_member(Some(spec.as_ref()))?;
                     Ok(member
                         .manifest_path
+                        .clone().into_std_path_buf()
                         .parent()
                         .expect(r#"`manifest_path` should end with "Cargo.toml""#)
                         .to_owned())
@@ -220,7 +223,7 @@ impl<W: WriteColor> Exclude<W> {
                 dry_run,
                 &mut stderr,
             )
-            .map(|p| acc | p)
+                .map(|p| acc | p)
         })?;
 
         if !modified {
@@ -253,7 +256,7 @@ pub struct Deactivate<W> {
 }
 
 impl Deactivate<NoColor<Sink>> {
-    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+    pub fn new<Ps: IntoIterator<Item=P>, P: AsRef<Path>>(
         workspace_root: &Path,
         paths: Ps,
     ) -> Self {
@@ -266,9 +269,9 @@ impl Deactivate<NoColor<Sink>> {
     }
 
     pub fn from_metadata<
-        Ps: IntoIterator<Item = P>,
+        Ps: IntoIterator<Item=P>,
         P: AsRef<Path>,
-        Ss: IntoIterator<Item = S>,
+        Ss: IntoIterator<Item=S>,
         S: AsRef<str>,
     >(
         metadata: &Metadata,
@@ -276,7 +279,7 @@ impl Deactivate<NoColor<Sink>> {
         specs: Ss,
     ) -> Self {
         Self {
-            workspace_root: Ok(metadata.workspace_root.clone()),
+            workspace_root: Ok(metadata.workspace_root.clone().into_std_path_buf()),
             paths: paths
                 .into_iter()
                 .map(ensure_absolute)
@@ -284,6 +287,7 @@ impl Deactivate<NoColor<Sink>> {
                     let member = metadata.query_for_member(Some(spec.as_ref()))?;
                     Ok(member
                         .manifest_path
+                        .clone().into_std_path_buf()
                         .parent()
                         .expect(r#"`manifest_path` should end with "Cargo.toml""#)
                         .to_owned())
@@ -329,7 +333,7 @@ impl<W: WriteColor> Deactivate<W> {
                 dry_run,
                 &mut stderr,
             )
-            .map(|p| acc | p)
+                .map(|p| acc | p)
         })?;
 
         if !modified {
@@ -702,6 +706,7 @@ impl Cp<NoColor<Sink>> {
             src: metadata.query_for_member(Some(src)).map(|member| {
                 member
                     .manifest_path
+                    .clone().into_std_path_buf()
                     .parent()
                     .expect(r#"`manifest_path` should end with "Cargo.toml""#)
                     .to_owned()
@@ -833,7 +838,7 @@ pub struct Rm<W> {
 }
 
 impl Rm<NoColor<Sink>> {
-    pub fn new<Ps: IntoIterator<Item = P>, P: AsRef<Path>>(
+    pub fn new<Ps: IntoIterator<Item=P>, P: AsRef<Path>>(
         workspace_root: &Path,
         paths: Ps,
     ) -> Self {
@@ -847,9 +852,9 @@ impl Rm<NoColor<Sink>> {
     }
 
     pub fn from_metadata<
-        Ps: IntoIterator<Item = P>,
+        Ps: IntoIterator<Item=P>,
         P: AsRef<Path>,
-        Ss: IntoIterator<Item = S>,
+        Ss: IntoIterator<Item=S>,
         S: AsRef<str>,
     >(
         metadata: &Metadata,
@@ -857,7 +862,7 @@ impl Rm<NoColor<Sink>> {
         specs: Ss,
     ) -> Self {
         Self {
-            workspace_root: Ok(metadata.workspace_root.clone()),
+            workspace_root: Ok(metadata.workspace_root.clone().into_std_path_buf()),
             paths: paths
                 .into_iter()
                 .map(ensure_absolute)
@@ -865,6 +870,7 @@ impl Rm<NoColor<Sink>> {
                     let member = metadata.query_for_member(Some(spec.as_ref()))?;
                     Ok(member
                         .manifest_path
+                        .clone().into_std_path_buf()
                         .parent()
                         .expect(r#"`manifest_path` should end with "Cargo.toml""#)
                         .to_owned())
@@ -933,7 +939,7 @@ impl<W: WriteColor> Rm<W> {
                 dry_run,
                 &mut stderr,
             )
-            .map(|p| acc | p)
+                .map(|p| acc | p)
         })?;
 
         if !modified {
@@ -981,10 +987,11 @@ impl Mv<NoColor<Sink>> {
 
     pub fn from_metadata(metadata: &Metadata, src: &str, dst: &Path) -> Self {
         Self {
-            workspace_root: Ok(metadata.workspace_root.clone()),
+            workspace_root: Ok(metadata.workspace_root.clone().into_std_path_buf()),
             src: metadata.query_for_member(Some(src)).map(|member| {
                 member
                     .manifest_path
+                    .clone().into_std_path_buf()
                     .parent()
                     .expect(r#"`manifest_path` should end with "Cargo.toml""#)
                     .to_owned()
@@ -1091,7 +1098,7 @@ fn cargo_metadata(
         cargo_metadata::Error::CargoMetadata { stderr } => anyhow!("{}", stderr.trim_end()),
         err => err.into(),
     })?;
-    debug!("workspace-root: {}", metadata.workspace_root.display());
+    debug!("workspace-root: {}", metadata.workspace_root.clone().into_std_path_buf().display());
     Ok(metadata)
 }
 
@@ -1110,10 +1117,10 @@ fn modify_members<'a>(
         rm_from_workspace_members,
         rm_from_workspace_exclude,
     ]
-    .iter()
-    .copied()
-    .flatten()
-    .any(|&p| p == possibly_empty_workspace_root)
+        .iter()
+        .copied()
+        .flatten()
+        .any(|&p| p == possibly_empty_workspace_root)
     {
         bail!(
             "`{}` is the workspace root",
@@ -1151,6 +1158,7 @@ fn modify_members<'a>(
             })
         };
 
+
         let array = cargo_toml["workspace"][field]
             .or_insert(toml_edit::value(toml_edit::Array::default()))
             .as_array_mut()
@@ -1159,9 +1167,18 @@ fn modify_members<'a>(
             let add = relative_to_root(add)?;
             if array.iter().all(|m| !same_paths(m, add)) {
                 if !dry_run {
+                    // push every new workspace on a new line and add a comma at the end of the name.
+                    // example: workspace = [
+                    //  "b",
+                    //  "c",
+                    // ]
+                    // this reduce the chance of git merge conflict
+                    // should we use 4 spaces to format?
                     array
-                        .push(add)
-                        .map_err(|_| anyhow!("`workspace.{}` must be an string array", field))?;
+                        .push_formatted(Value::from(add).decorated("\n    ", ""));
+                    // we push to the end, so these two option only affect the element we pushed
+                    array.set_trailing_comma(true);
+                    array.set_trailing("\n");
                 }
                 stderr.status("Adding", format!("{:?} to `workspace.{}`", add, field))?;
             }

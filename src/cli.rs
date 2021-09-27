@@ -524,7 +524,7 @@ fn focus(opt: CargoMemberFocus, ctx: Context<impl WriteColor>) -> anyhow::Result
         crate::cargo_metadata(manifest_path.as_deref(), dry_run, dry_run, offline, &cwd)?;
     let path = cwd.join(path.trim_leading_dots());
 
-    Focus::new(&workspace_root, &path)
+    Focus::new(&workspace_root.into_std_path_buf(), &path)
         .dry_run(dry_run)
         .offline(offline)
         .exclude(exclude)
